@@ -14,55 +14,65 @@ export default async function refreshRoute(fastify: FastifyInstance) {
       include: { user: { select: { id: true, isAdmin: true, isSuspended: true } } },
     });
 
-    // Detect token reuse â€” if token was already revoked, someone may be replaying a stolen token
+    // Detect token reuse — if token was already revoked, someone may be replaying a stolen token
     if (stored && stored.revokedAt) {
       // Revoke ALL sessions for this user as a precaution (token theft likely)
-      fastify.log.warn({ userId: stored.userId }, "Refresh token reuse detected â€” revoking all sessions");
+      fastify.log.warn({ userId: stored.userId }, "Refresh token reuse detected — revoking all sessions");
       await fastify.prisma.refreshToken.updateMany({
         where: { userId: stored.userId, revokedAt: null },
         data: { revokedAt: new Date() },
       });
-      reply.clearCookie("refreshToken", { path: "/auth/refresh" });
+      reply.clearCookie("refreshToken", { path: "/" });
       throw new UnauthorizedError("Session invalidated. Please log in again.");
     }
 
     if (!stored || stored.expiresAt < new Date()) {
-      reply.clearCookie("refreshToken", { path: "/auth/refresh" });
+      reply.clearCookie("refreshToken", { path: "/" });
       throw new UnauthorizedError("Invalid or expired refresh token");
     }
 
     if (stored.user.isSuspended) {
-      reply.clearCookie("refreshToken", { path: "/auth/refresh" });
+      reply.clearCookie("refreshToken", { path: "/" });
       throw new UnauthorizedError("Account is suspended");
     }
 
-    // Refresh token rotation â€” revoke old token, issue new one
+    // Bug 9 fix: Atomic revoke — only proceeds if token is still active
+    // Prevents rotation race condition where two concurrent requests both rotate the same token
+    const revoked = await fastify.prisma.refreshToken.updateMany({
+      where: { id: stored.id, revokedAt: null },
+      data: { revokedAt: new Date() },
+    });
+
+    if (revoked.count === 0) {
+      // Another request already rotated this token — treat as reuse
+      fastify.log.warn({ userId: stored.userId }, "Refresh token rotation race — treating as reuse");
+      await fastify.prisma.refreshToken.updateMany({
+        where: { userId: stored.userId, revokedAt: null },
+        data: { revokedAt: new Date() },
+      });
+      reply.clearCookie("refreshToken", { path: "/" });
+      throw new UnauthorizedError("Session invalidated. Please log in again.");
+    }
+
+    // Issue new token only after successfully revoking old one
     const newRawToken = generateRefreshToken();
     const newTokenHash = hashRefreshToken(newRawToken);
     const newExpiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
 
-    await fastify.prisma.$transaction([
-      // Revoke the used token
-      fastify.prisma.refreshToken.update({
-        where: { id: stored.id },
-        data: { revokedAt: new Date() },
-      }),
-      // Issue replacement token
-      fastify.prisma.refreshToken.create({
-        data: {
-          userId: stored.user.id,
-          tokenHash: newTokenHash,
-          expiresAt: newExpiresAt,
-        },
-      }),
-    ]);
+    await fastify.prisma.refreshToken.create({
+      data: {
+        userId: stored.user.id,
+        tokenHash: newTokenHash,
+        expiresAt: newExpiresAt,
+      },
+    });
 
-    // Set new refresh token cookie
+    // Bug 8 fix: cookie path changed to "/" so logout and other routes receive it
     reply.setCookie("refreshToken", newRawToken, {
       httpOnly: true,
       secure: process.env["NODE_ENV"] === "production",
       sameSite: "strict",
-      path: "/auth/refresh",
+      path: "/",
       maxAge: 7 * 24 * 60 * 60,
     });
 

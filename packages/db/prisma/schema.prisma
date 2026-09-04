@@ -222,6 +222,8 @@ model Order {
   refillRequestedAt DateTime?
   providerRefillId  String?
   refillStatus      String?
+  refundedAt        DateTime?
+  refundedAmountUsd Decimal?    @db.Decimal(18, 8)
   createdAt         DateTime    @default(now())
   updatedAt         DateTime    @updatedAt
 

@@ -129,7 +129,7 @@ export default async function loginRoute(fastify: FastifyInstance) {
       httpOnly: true,
       secure: process.env["NODE_ENV"] === "production",
       sameSite: "strict",
-      path: "/auth/refresh",
+      path: "/",
       maxAge: 7 * 24 * 60 * 60,
     });
 

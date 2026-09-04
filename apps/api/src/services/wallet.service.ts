@@ -15,6 +15,13 @@ interface CreditOptions {
   paymentGatewayId?: string;
 }
 
+interface RefundOrderOptions {
+  userId: string;
+  amountUsd: Decimal;
+  inrRate: Decimal;
+  description: string;
+}
+
 // ── Internal helpers (accept existing tx client — no nested transactions) ─────
 
 /**
@@ -97,6 +104,45 @@ export async function deductWalletTx(
       balanceBefore: balance.toDecimalPlaces(8).toNumber(),
       balanceAfter: newBalance.toDecimalPlaces(8).toNumber(),
     },
+  });
+}
+
+/**
+ * Unified refund function inside an EXISTING transaction.
+ * Checks orders.refundedAt — if already set, throws "already refunded".
+ * Sets refundedAt + refundedAmountUsd on the order, then credits wallet.
+ * Uses a single idempotency key: "refund:<orderId>"
+ */
+export async function refundOrderTx(
+  tx: TxClient,
+  orderId: string,
+  options: RefundOrderOptions,
+): Promise<void> {
+  // Row-lock the order and check refundedAt atomically
+  const rows = await tx.$queryRaw<Array<{ refundedAt: Date | null }>>`
+    SELECT "refundedAt" FROM "orders" WHERE id = ${orderId} FOR UPDATE
+  `;
+  if (!rows[0]) throw new Error(`Order ${orderId} not found`);
+  if (rows[0].refundedAt !== null) {
+    throw new Error(`Order ${orderId} already refunded`);
+  }
+
+  // Mark refunded on the order
+  await (tx as any).order.update({
+    where: { id: orderId },
+    data: {
+      refundedAt: new Date(),
+      refundedAmountUsd: options.amountUsd.toDecimalPlaces(8).toNumber(),
+    },
+  });
+
+  // Credit wallet using unified idempotency key
+  await creditWalletTx(tx, options.userId, options.amountUsd, {
+    type: "REFUND",
+    description: options.description,
+    orderId,
+    inrRate: options.inrRate,
+    paymentGatewayId: `refund:${orderId}`,
   });
 }
 

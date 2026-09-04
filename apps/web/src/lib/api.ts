@@ -1,24 +1,17 @@
 import axios, { type AxiosError } from "axios";
-import Cookies from "js-cookie";
 
 const BASE_URL = process.env["NEXT_PUBLIC_API_URL"] ?? "http://localhost:3001";
 
 export const api = axios.create({
   baseURL: BASE_URL,
-  withCredentials: true,
+  withCredentials: true, // sends HttpOnly cookies automatically
   headers: { "Content-Type": "application/json" },
 });
 
-// Attach access token from cookie on every request
-api.interceptors.request.use((config) => {
-  const token = Cookies.get("accessToken");
-  if (token) config.headers["Authorization"] = `Bearer ${token}`;
-  return config;
-});
+// No request interceptor needed — HttpOnly cookie sent automatically via withCredentials
 
-// Auto-refresh on 401
 let isRefreshing = false;
-let refreshQueue: Array<(token: string) => void> = [];
+let refreshQueue: Array<() => void> = [];
 
 api.interceptors.response.use(
   (res) => res,
@@ -28,10 +21,7 @@ api.interceptors.response.use(
     if (error.response?.status === 401 && !original._retry) {
       if (isRefreshing) {
         return new Promise((resolve) => {
-          refreshQueue.push((token: string) => {
-            original.headers!["Authorization"] = `Bearer ${token}`;
-            resolve(api(original));
-          });
+          refreshQueue.push(() => resolve(api(original)));
         });
       }
 
@@ -39,20 +29,12 @@ api.interceptors.response.use(
       isRefreshing = true;
 
       try {
-        const res = await axios.post<{ accessToken: string }>(
-          `${BASE_URL}/auth/refresh`,
-          {},
-          { withCredentials: true },
-        );
-        const newToken = res.data.accessToken;
-        Cookies.set("accessToken", newToken, { expires: 1 / 96 }); // 15 min
-        api.defaults.headers.common["Authorization"] = `Bearer ${newToken}`;
-        refreshQueue.forEach((cb) => cb(newToken));
+        // Refresh — backend sets new HttpOnly cookies automatically
+        await axios.post(`${BASE_URL}/auth/refresh`, {}, { withCredentials: true });
+        refreshQueue.forEach((cb) => cb());
         refreshQueue = [];
-        original.headers!["Authorization"] = `Bearer ${newToken}`;
-        return api(original);
+        return api(original); // retry original request — new cookie already set
       } catch {
-        Cookies.remove("accessToken");
         if (typeof window !== "undefined") window.location.href = "/login";
         return Promise.reject(error);
       } finally {

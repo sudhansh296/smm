@@ -3,7 +3,7 @@ import { z } from "zod";
 import { Decimal } from "decimal.js";
 import { ProviderClient } from "../../services/provider.service.js";
 import { NotFoundError, ValidationError } from "../../lib/errors.js";
-import { creditWalletTx } from "../../services/wallet.service.js";
+import { refundOrderTx } from "../../services/wallet.service.js";
 
 export default async function adminOrdersRoute(fastify: FastifyInstance) {
   // List all orders
@@ -94,33 +94,31 @@ export default async function adminOrdersRoute(fastify: FastifyInstance) {
       });
 
       if (!order) throw new NotFoundError("Order not found");
-      if (order.status === "REFUNDED") throw new ValidationError("Order is already refunded");
+      // Block if already refunded (either status REFUNDED or refundedAt set — covers cancelled orders)
+      if (order.status === "REFUNDED" || (order as any).refundedAt) {
+        throw new ValidationError("Order has already been refunded");
+      }
 
       const refundAmount = new Decimal(order.costUsd.toString());
-      // Idempotency key — unique per order prevents double-refund even under concurrent requests
-      const idempotencyKey = `admin-refund:${id}`;
 
       await fastify.prisma.$transaction(async (tx) => {
         // Double-check inside transaction with row lock — prevents race condition
-        const locked = await tx.$queryRaw<Array<{ status: string }>>`
-          SELECT status FROM orders WHERE id = ${id} FOR UPDATE
+        const locked = await tx.$queryRaw<Array<{ status: string; refundedAt: Date | null }>>`
+          SELECT status, "refundedAt" FROM orders WHERE id = ${id} FOR UPDATE
         `;
-        if (!locked[0] || locked[0].status === "REFUNDED") return; // Already refunded
+        if (!locked[0] || locked[0].status === "REFUNDED" || locked[0].refundedAt !== null) return;
 
         await tx.order.update({ where: { id }, data: { status: "REFUNDED" } });
 
-        // creditWalletTx — no nested transaction
-        await creditWalletTx(
-          tx as Parameters<typeof creditWalletTx>[0],
-          order.userId,
-          refundAmount,
+        // refundOrderTx handles idempotency key + sets refundedAt atomically
+        await refundOrderTx(
+          tx as Parameters<typeof refundOrderTx>[0],
+          id,
           {
-            type: "REFUND",
-            description: reason,
-            orderId: id,
+            userId: order.userId,
+            amountUsd: refundAmount,
             inrRate: new Decimal(order.inrRateAtOrder.toString()),
-            // Unique key prevents duplicate ledger entries (unique constraint in DB)
-            paymentGatewayId: idempotencyKey,
+            description: reason,
           },
         );
 

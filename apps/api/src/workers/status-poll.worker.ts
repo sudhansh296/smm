@@ -2,7 +2,7 @@ import { Worker, type Job } from "bullmq";
 import type { Redis } from "ioredis";
 import type { PrismaClient } from "@nexussmm/db";
 import { ProviderClient } from "../services/provider.service.js";
-import { creditWalletTx } from "../services/wallet.service.js";
+import { refundOrderTx } from "../services/wallet.service.js";
 import { Decimal } from "decimal.js";
 
 const PROVIDER_STATUS_MAP: Record<string, string> = {
@@ -80,25 +80,29 @@ export function createStatusPollWorker(redis: Redis, prisma: PrismaClient) {
 
                 if (refundAmount.greaterThan(0)) {
                   await prisma.$transaction(async (tx) => {
-                    await tx.order.update({
+                    await (tx as any).order.update({
                       where: { id: order.id },
                       data: { status: newStatus as never, remains, startCount } as never,
                     });
 
-                    await creditWalletTx(
-                      tx as Parameters<typeof creditWalletTx>[0],
-                      order.userId,
-                      refundAmount,
-                      {
-                        type: "REFUND",
-                        description: `Refund: ${remains} units undelivered for order #${order.id}`,
-                        orderId: order.id,
-                        inrRate: new Decimal(order.inrRateAtOrder.toString()),
-                        paymentGatewayId: `poll-refund:${order.id}`,
-                      },
-                    );
+                    // Bug 1 fix: use refundOrderTx — checks refundedAt to prevent double-refund
+                    try {
+                      await refundOrderTx(
+                        tx as Parameters<typeof refundOrderTx>[0],
+                        order.id,
+                        {
+                          userId: order.userId,
+                          amountUsd: refundAmount,
+                          inrRate: new Decimal(order.inrRateAtOrder.toString()),
+                          description: `Refund: ${remains} units undelivered for order #${order.id}`,
+                        },
+                      );
+                    } catch (alreadyRefunded) {
+                      // Already refunded — skip wallet credit, just update status
+                      console.warn(`[status-poll] Order ${order.id} already refunded, skipping wallet credit`);
+                    }
 
-                    await tx.notification.create({
+                    await (tx as any).notification.create({
                       data: {
                         userId: order.userId,
                         message: `Order #${order.id} ${newStatus.toLowerCase()}: $${refundAmount.toFixed(2)} refunded for ${remains} undelivered units.`,

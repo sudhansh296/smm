@@ -3,7 +3,7 @@ import { createHash } from "crypto";
 import { Decimal } from "decimal.js";
 import { z } from "zod";
 import { createOrder } from "../../services/order.service.js";
-import { creditWalletTx } from "../../services/wallet.service.js";
+import { refundOrderTx } from "../../services/wallet.service.js";
 import { ProviderClient } from "../../services/provider.service.js";
 
 const API_V2_RATE_LIMIT_MAX = 60;
@@ -114,11 +114,22 @@ export default async function apiV2Route(fastify: FastifyInstance) {
         const order = await fastify.prisma.order.findFirst({ where: { id: orderId, userId: user.id }, include: { service: true } });
         if (!order) return reply.status(404).send({ error: "Order not found" });
         if (!order.service.supportsRefill) return reply.status(400).send({ error: "Service does not support refill" });
-        if (order.refillStatus === "pending" || order.refillStatus === "processing") {
+
+        // Atomic conditional update — prevents race condition
+        const updated = await fastify.prisma.order.updateMany({
+          where: {
+            id: orderId,
+            userId: user.id,
+            status: { in: ["COMPLETED", "PARTIAL"] },
+            refillStatus: { notIn: ["pending", "processing"] },
+          },
+          data: { refillRequestedAt: new Date(), refillStatus: "pending" },
+        });
+        if (updated.count === 0) {
           return reply.status(400).send({ error: "A refill is already in progress" });
         }
-        await fastify.prisma.order.update({ where: { id: orderId }, data: { refillRequestedAt: new Date(), refillStatus: "pending" } });
-        await fastify.queues.refill.add("refill", { orderId }, { jobId: `refill:${orderId}:${Date.now()}` });
+        // Deterministic job ID prevents duplicate jobs
+        await fastify.queues.refill.add("refill", { orderId }, { jobId: `refill:${orderId}` });
         return reply.send({ refill: orderId });
       }
 
@@ -145,29 +156,24 @@ export default async function apiV2Route(fastify: FastifyInstance) {
             return { order: orderId, cancel: { error: "Cannot cancel this order" } };
           }
 
-          // Idempotency key per order — prevents double refund under concurrent requests
-          const idempotencyKey = `cancel:${orderId}`;
-
           try {
             await fastify.prisma.$transaction(async (tx) => {
               // Row-lock to prevent race condition
-              const locked = await tx.$queryRaw<Array<{ status: string }>>`
-                SELECT status FROM orders WHERE id = ${orderId} FOR UPDATE
+              const locked = await tx.$queryRaw<Array<{ status: string; refundedAt: Date | null }>>`
+                SELECT status, "refundedAt" FROM orders WHERE id = ${orderId} FOR UPDATE
               `;
               if (!locked[0] || !["PENDING", "PROCESSING"].includes(locked[0].status)) return;
 
               await tx.order.update({ where: { id: orderId }, data: { status: "CANCELLED" } });
 
-              await creditWalletTx(
-                tx as Parameters<typeof creditWalletTx>[0],
-                order.userId,
-                new Decimal(order.costUsd.toString()),
+              await refundOrderTx(
+                tx as Parameters<typeof refundOrderTx>[0],
+                orderId,
                 {
-                  type: "REFUND",
-                  description: `Refund: order #${orderId} cancelled via API v2`,
-                  orderId,
+                  userId: order.userId,
+                  amountUsd: new Decimal(order.costUsd.toString()),
                   inrRate: new Decimal(order.inrRateAtOrder.toString()),
-                  paymentGatewayId: idempotencyKey,
+                  description: `Refund: order #${orderId} cancelled via API v2`,
                 },
               );
             });

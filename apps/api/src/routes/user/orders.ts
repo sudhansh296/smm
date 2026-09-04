@@ -3,7 +3,7 @@ import { z } from "zod";
 import { Decimal } from "decimal.js";
 import { NotFoundError, ForbiddenError, ValidationError } from "../../lib/errors.js";
 import { ProviderClient } from "../../services/provider.service.js";
-import { creditWalletTx } from "../../services/wallet.service.js";
+import { refundOrderTx } from "../../services/wallet.service.js";
 
 const querySchema = z.object({
   page: z.coerce.number().min(1).default(1),
@@ -56,28 +56,23 @@ export default async function userOrdersRoute(fastify: FastifyInstance) {
       throw new ValidationError("Only PENDING or PROCESSING orders can be cancelled");
     }
 
-    // Idempotency key — prevents double refund under concurrent cancel requests
-    const idempotencyKey = `cancel:${id}`;
-
     // Atomic: row-lock order, mark cancelled, refund — all in one transaction
     await fastify.prisma.$transaction(async (tx) => {
-      const locked = await tx.$queryRaw<Array<{ status: string }>>`
-        SELECT status FROM orders WHERE id = ${id} FOR UPDATE
+      const locked = await tx.$queryRaw<Array<{ status: string; refundedAt: Date | null }>>`
+        SELECT status, "refundedAt" FROM orders WHERE id = ${id} FOR UPDATE
       `;
       if (!locked[0] || !["PENDING", "PROCESSING"].includes(locked[0].status)) return;
 
       await tx.order.update({ where: { id }, data: { status: "CANCELLED" } });
 
-      await creditWalletTx(
-        tx as Parameters<typeof creditWalletTx>[0],
-        userId,
-        new Decimal(order.costUsd.toString()),
+      await refundOrderTx(
+        tx as Parameters<typeof refundOrderTx>[0],
+        id,
         {
-          type: "REFUND",
-          description: `Refund: order #${id.slice(-8)} cancelled by user`,
-          orderId: id,
+          userId,
+          amountUsd: new Decimal(order.costUsd.toString()),
           inrRate: new Decimal(order.inrRateAtOrder.toString()),
-          paymentGatewayId: idempotencyKey,
+          description: `Refund: order #${id.slice(-8)} cancelled by user`,
         },
       );
 
@@ -122,18 +117,24 @@ export default async function userOrdersRoute(fastify: FastifyInstance) {
     }
     if (!order.service.supportsRefill) throw new ForbiddenError("This service does not support refill");
 
-    // Prevent duplicate refill requests — only allow if not already pending/processing
-    if (order.refillStatus === "pending" || order.refillStatus === "processing") {
-      throw new ValidationError("A refill is already in progress for this order");
-    }
-
-    await fastify.prisma.order.update({
-      where: { id },
+    // Atomic conditional update — only succeeds if not already pending/processing
+    const updated = await fastify.prisma.order.updateMany({
+      where: {
+        id,
+        userId,
+        status: { in: ["COMPLETED", "PARTIAL"] },
+        refillStatus: { notIn: ["pending", "processing"] },
+      },
       data: { refillRequestedAt: new Date(), refillStatus: "pending" },
     });
 
+    if (updated.count === 0) {
+      throw new ValidationError("A refill is already in progress for this order");
+    }
+
+    // Deterministic job ID — prevents duplicate jobs even if request fires twice
     await fastify.queues.refill.add("refill", { orderId: id }, {
-      jobId: `refill:${id}:${Date.now()}`, // unique job per request
+      jobId: `refill:${id}`,
       removeOnComplete: true,
     });
 

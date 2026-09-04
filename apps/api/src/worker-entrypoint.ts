@@ -33,6 +33,36 @@ async function startWorkers() {
 
   console.log("✅ All workers started");
 
+  // Bug 4: Recovery — re-enqueue PENDING orders older than 5 min with no providerOrderId
+  // This handles the case where Redis was down after DB commit (job was lost)
+  async function recoverPendingOrders() {
+    try {
+      const stuckOrders = await prisma.order.findMany({
+        where: {
+          status: "PENDING",
+          providerOrderId: null,
+          createdAt: { lt: new Date(Date.now() - 5 * 60 * 1000) },
+        },
+        select: { id: true },
+      });
+      for (const order of stuckOrders) {
+        const existing = await queues.orderForward.getJob(order.id);
+        if (!existing) {
+          await queues.orderForward.add("forward", { orderId: order.id }, { jobId: order.id });
+          console.log(`[worker-entrypoint] Recovered stuck PENDING order ${order.id}`);
+        }
+      }
+      if (stuckOrders.length > 0) {
+        console.log(`[worker-entrypoint] Recovery complete: checked ${stuckOrders.length} stuck orders`);
+      }
+    } catch (err) {
+      console.error("[worker-entrypoint] Recovery scan failed:", err);
+    }
+  }
+
+  // Run recovery after a short delay to let workers initialize
+  setTimeout(() => { recoverPendingOrders().catch((e) => console.error("[worker-entrypoint] Recovery error:", e)); }, 5000);
+
   // Register repeatable status poll job — every 2 minutes
   await queues.statusPoll.add(
     "poll-all-open-orders",

@@ -81,8 +81,13 @@ export default async function razorpayDepositRoute(fastify: FastifyInstance) {
     if (!deposit) return reply.status(404).send({ error: "Deposit not found" });
     if (deposit.status === "COMPLETED") return reply.send({ message: "Already credited" });
 
-    const effectiveRate = await getEffectiveInrRate(fastify.redis, fastify.prisma);
-    const amountUsd = new Decimal((deposit as any).amountInr).dividedBy(effectiveRate).toDecimalPlaces(8);
+    // Bug 6 fix: use inrRateSnapshot (rate at time of deposit creation), not current rate
+    if (!(deposit as any).inrRateSnapshot) {
+      fastify.log.error({ depositId: deposit.id }, "Missing inrRateSnapshot on deposit");
+      return reply.status(500).send({ error: "Cannot process payment — rate snapshot missing" });
+    }
+    const snapshotRate = new Decimal((deposit as any).inrRateSnapshot.toString());
+    const amountUsd = new Decimal((deposit as any).amountInr).dividedBy(snapshotRate).toDecimalPlaces(8);
 
     await fastify.prisma.$transaction(async (tx) => {
       await tx.depositRequest.update({
@@ -99,7 +104,7 @@ export default async function razorpayDepositRoute(fastify: FastifyInstance) {
           type: "DEPOSIT_INR",
           amountUsd: amountUsd.toDecimalPlaces(8).toNumber(),
           amountInr: new Decimal((deposit as any).amountInr).toDecimalPlaces(4).toNumber(),
-          inrRate: new Decimal(effectiveRate).toDecimalPlaces(4).toNumber(),
+          inrRate: snapshotRate.toDecimalPlaces(4).toNumber(),
           description: `Razorpay deposit ₹${(deposit as any).amountInr}`,
           balanceBefore: balance.toDecimalPlaces(8).toNumber(),
           balanceAfter: newBalance.toDecimalPlaces(8).toNumber(),

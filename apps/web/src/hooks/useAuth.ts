@@ -1,10 +1,9 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, getErrorMessage } from "@/lib/api";
 import { useAuthStore } from "@/store/auth.store";
-import { setAccessToken, removeAccessToken } from "@/lib/auth";
 import type { UserProfile, LoginInput, RegisterInput } from "@nexussmm/types";
 import { toast } from "sonner";
 
@@ -24,8 +23,8 @@ export function useAuth() {
     },
     onSuccess: (data) => {
       if (data.requiresTotpCode) return; // handled by caller
-      setAccessToken(data.accessToken);
-      setAuth(data.user, data.accessToken);
+      // Access token is now HttpOnly cookie — no need to store it in JS
+      setAuth(data.user, ""); // store user profile only; token is in HttpOnly cookie
       toast.success("Logged in successfully");
       router.push("/dashboard");
     },
@@ -49,7 +48,7 @@ export function useAuth() {
       await api.post("/auth/logout");
     },
     onSuccess: () => {
-      removeAccessToken();
+      // Server clears HttpOnly cookies on logout
       clearAuth();
       queryClient.clear();
       router.push("/login");
