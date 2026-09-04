@@ -1,0 +1,50 @@
+{
+  "name": "@nexussmm/api",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/server.js",
+  "scripts": {
+    "dev": "tsx --tsconfig tsconfig.json watch src/server.ts",
+    "dev:worker": "cross-env WORKER_MODE=true tsx --tsconfig tsconfig.json src/worker-entrypoint.ts",
+    "build": "tsc",
+    "start": "node dist/server.js",
+    "start:worker": "node dist/worker-entrypoint.js",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src --ext .ts"
+  },
+  "dependencies": {
+    "@fastify/cookie": "^9.4.0",
+    "@fastify/cors": "^9.0.1",
+    "@fastify/formbody": "^7.4.0",
+    "@fastify/jwt": "^8.0.1",
+    "@fastify/multipart": "^8.3.0",
+    "@fastify/oauth2": "^7.6.0",
+    "@fastify/rate-limit": "^9.1.0",
+    "@nexussmm/db": "workspace:*",
+    "@nexussmm/queue": "workspace:*",
+    "@nexussmm/types": "workspace:*",
+    "bcryptjs": "^2.4.3",
+    "bullmq": "^5.34.0",
+    "crypto": "^1.0.1",
+    "decimal.js": "^10.4.3",
+    "dotenv": "^16.4.7",
+    "fastify": "^4.28.1",
+    "fastify-plugin": "^4.5.1",
+    "ioredis": "^5.4.1",
+    "nanoid": "^5.0.9",
+    "nodemailer": "^6.9.16",
+    "otpauth": "^9.3.5",
+    "qrcode": "^1.5.4",
+    "razorpay": "^2.9.5",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/bcryptjs": "^2.4.6",
+    "@types/node": "^22.10.0",
+    "@types/nodemailer": "^6.4.17",
+    "@types/qrcode": "^1.5.5",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}

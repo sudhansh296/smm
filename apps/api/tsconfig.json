@@ -1,0 +1,21 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "./dist",
+    "baseUrl": ".",
+    "skipLibCheck": true,
+    "paths": {
+      "@nexussmm/db": ["../../packages/db/src/index.ts"],
+      "@nexussmm/queue": ["../../packages/queue/src/index.ts"],
+      "@nexussmm/types": ["../../packages/types/src/index.ts"],
+      "@prisma/client": ["../../node_modules/.pnpm/@prisma+client@5.22.0_prisma@5.22.0/node_modules/@prisma/client/index.d.ts"]
+    }
+  },
+  "include": [
+    "src/**/*",
+    "../../packages/types/src/**/*",
+    "../../packages/db/src/**/*",
+    "../../packages/queue/src/**/*"
+  ],
+  "exclude": ["node_modules", "dist"]
+}

@@ -1,0 +1,360 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Users & Auth
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+model User {
+  id                  String   @id @default(cuid())
+  email               String   @unique
+  displayName         String
+  passwordHash        String?
+  emailVerified       Boolean  @default(false)
+  walletBalance       Decimal  @default(0.00) @db.Decimal(18, 8)
+  isAdmin             Boolean  @default(false)
+  isSuspended         Boolean  @default(false)
+  totpEnabled         Boolean  @default(false)
+  totpSecretEncrypted String?
+  failedLoginAttempts Int      @default(0)
+  lockedUntil         DateTime?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  oauthAccounts      OAuthAccount[]
+  emailVerifications EmailVerification[]
+  passwordResets     PasswordReset[]
+  totpBackupCodes    TotpBackupCode[]
+  refreshTokens      RefreshToken[]
+  apiKey             ApiKey?
+  orders             Order[]
+  transactions       Transaction[]
+  depositRequests    DepositRequest[]
+  notifications      Notification[]
+
+  @@index([email])
+  @@index([isSuspended])
+  @@index([createdAt])
+  @@map("users")
+}
+
+model OAuthAccount {
+  id             String   @id @default(cuid())
+  userId         String
+  provider       String
+  providerUserId String
+  createdAt      DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerUserId])
+  @@index([userId])
+  @@map("oauth_accounts")
+}
+
+model EmailVerification {
+  id        String    @id @default(cuid())
+  userId    String
+  token     String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([token])
+  @@index([userId])
+  @@map("email_verifications")
+}
+
+model PasswordReset {
+  id        String    @id @default(cuid())
+  userId    String
+  token     String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([token])
+  @@index([userId])
+  @@map("password_resets")
+}
+
+model TotpBackupCode {
+  id        String    @id @default(cuid())
+  userId    String
+  codeHash  String
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("totp_backup_codes")
+}
+
+model RefreshToken {
+  id        String    @id @default(cuid())
+  userId    String
+  tokenHash String    @unique
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([tokenHash])
+  @@map("refresh_tokens")
+}
+
+model ApiKey {
+  id        String    @id @default(cuid())
+  userId    String    @unique
+  keyHash   String    @unique
+  lastEight String
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([keyHash])
+  @@map("api_keys")
+}
+
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Services & Providers
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+model Provider {
+  id               String   @id @default(cuid())
+  name             String
+  apiUrl           String
+  apiKeyEncrypted  String
+  isEnabled        Boolean  @default(true)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  services Service[]
+
+  @@map("providers")
+}
+
+model Category {
+  id           String   @id @default(cuid())
+  name         String
+  displayOrder Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  services Service[]
+
+  @@map("categories")
+}
+
+model Service {
+  id                String   @id @default(cuid())
+  name              String
+  description       String   @default("")
+  categoryId        String
+  providerId        String
+  providerServiceId String
+  costPriceUsd      Decimal  @db.Decimal(18, 8)
+  sellingPriceUsd   Decimal  @db.Decimal(18, 8)
+  markupOverride    Decimal? @db.Decimal(5, 2)
+  minQuantity       Int
+  maxQuantity       Int
+  isEnabled         Boolean  @default(true)
+  supportsRefill    Boolean  @default(false)
+  displayOrder      Int      @default(0)
+  backupProviderId        String?
+  backupProviderServiceId String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  category Category @relation(fields: [categoryId], references: [id])
+  provider Provider @relation(fields: [providerId], references: [id])
+  orders   Order[]
+
+  @@unique([providerId, providerServiceId])
+  @@index([categoryId])
+  @@index([isEnabled])
+  @@index([name])
+  @@index([displayOrder])
+  @@map("services")
+}
+
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Orders
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+enum OrderStatus {
+  PENDING
+  PROCESSING
+  IN_PROGRESS
+  COMPLETED
+  PARTIAL
+  CANCELLED
+  REFUNDED
+}
+
+model Order {
+  id                String      @id @default(cuid())
+  userId            String
+  serviceId         String
+  link              String
+  quantity          Int
+  costUsd           Decimal     @db.Decimal(18, 8)
+  inrRateAtOrder    Decimal     @db.Decimal(18, 4)
+  status            OrderStatus @default(PENDING)
+  providerOrderId       String?
+  fulfillmentProviderId String?   // Which provider actually fulfilled this order (may differ from service.providerId if backup was used)
+  startCount        Int?
+  remains           Int?
+  refillRequestedAt DateTime?
+  providerRefillId  String?
+  refillStatus      String?
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
+
+  user         User          @relation(fields: [userId], references: [id])
+  service      Service       @relation(fields: [serviceId], references: [id])
+  transactions Transaction[]
+
+  @@index([userId])
+  @@index([status])
+  @@index([createdAt])
+  @@index([providerOrderId])
+  @@index([userId, status])
+  @@map("orders")
+}
+
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Wallet & Transactions
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+enum TransactionType {
+  DEPOSIT_INR
+  DEPOSIT_USDT
+  ORDER_CHARGE
+  REFUND
+  ADMIN_ADJUSTMENT
+}
+
+model Transaction {
+  id               String          @id @default(cuid())
+  userId           String
+  orderId          String?
+  type             TransactionType
+  amountUsd        Decimal         @db.Decimal(18, 8)
+  amountInr        Decimal?        @db.Decimal(18, 4)
+  inrRate          Decimal?        @db.Decimal(18, 4)
+  description      String
+  balanceBefore    Decimal         @db.Decimal(18, 8)
+  balanceAfter     Decimal         @db.Decimal(18, 8)
+  paymentGatewayId String?         @unique
+  createdAt        DateTime        @default(now())
+
+  user  User   @relation(fields: [userId], references: [id])
+  order Order? @relation(fields: [orderId], references: [id])
+
+  @@index([userId])
+  @@index([type])
+  @@index([createdAt])
+  @@index([paymentGatewayId])
+  @@index([userId, type])
+  @@index([userId, createdAt])
+  @@map("transactions")
+}
+
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Deposit Requests
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+enum DepositStatus {
+  PENDING
+  COMPLETED
+  FAILED
+  EXPIRED
+}
+
+model DepositRequest {
+  id               String        @id @default(cuid())
+  userId           String
+  gateway          String
+  amountInr        Decimal?      @db.Decimal(18, 4)
+  amountUsdt       Decimal?      @db.Decimal(18, 8)
+  gatewayOrderId   String        @unique
+  gatewayPaymentId String?
+  status           DepositStatus @default(PENDING)
+  inrRateSnapshot  Decimal?      @db.Decimal(18, 4)
+  method           String        @default("AUTO")  // AUTO | MANUAL_INR | MANUAL_USDT
+  txId             String?       // user-submitted UTR / TxHash
+  adminNote        String?       // admin approval/rejection note
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([gatewayOrderId])
+  @@index([status])
+  @@index([method])
+  @@map("deposit_requests")
+}
+
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Settings (singleton rows)
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+model CurrencySettings {
+  id                   String    @id @default("singleton")
+  manualInrRate        Decimal   @db.Decimal(18, 4)
+  markupPercent        Decimal   @db.Decimal(5, 2)
+  depositMarkupPercent Decimal   @default(5)  @db.Decimal(5, 2) @map("depositmarkuppercent")
+  serviceMarkupPercent Decimal   @default(10) @db.Decimal(5, 2) @map("servicemarkuppercent")
+  autoUpdateEnabled    Boolean   @default(false)
+  autoUpdateFreq       String    @default("hourly")
+  lastFetchedRate      Decimal?  @db.Decimal(18, 4)
+  lastFetchedAt        DateTime?
+  updatedAt            DateTime  @updatedAt
+
+  @@map("currency_settings")
+}
+
+model SiteSettings {
+  id              String   @id @default("singleton")
+  siteName        String   @default("NexusSMM")
+  logoUrl         String?
+  maintenanceMode Boolean  @default(false)
+  updatedAt       DateTime @updatedAt
+
+  @@map("site_settings")
+}
+
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Notifications
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String
+  message   String
+  isRead    Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, isRead])
+  @@index([userId, createdAt])
+  @@map("notifications")
+}
+

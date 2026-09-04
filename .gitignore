@@ -1,0 +1,48 @@
+# Dependencies
+node_modules
+.pnpm-store
+
+# Build outputs
+dist
+.next
+.turbo
+build
+out
+
+# Environment — NEVER commit real secrets
+.env
+.env.local
+.env.production
+.env.development
+.env.staging
+*.env
+
+# Database
+postgres_data
+redis_data
+dump.rdb
+*.rdb
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+
+# Misc
+letsencrypt
+certbot
+coverage
+.nyc_output
+api-out*.txt
+api-err*.txt
