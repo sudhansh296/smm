@@ -27,30 +27,26 @@ export function createStatusPollWorker(redis: Redis, prisma: PrismaClient) {
           status: { in: ["PENDING", "PROCESSING", "IN_PROGRESS"] },
           providerOrderId: { not: null },
         },
-        include: {
-          service: { include: { provider: true } },
-        },
+        include: { service: { include: { provider: true } } },
       });
 
       if (!openOrders.length) return;
 
-      // Group by FULFILLMENT provider (not service provider — backup may have been used)
+      // Group by FULFILLMENT provider — backup provider may have handled the order
       const byProvider = new Map<string, typeof openOrders>();
       for (const order of openOrders) {
-        // Use fulfillmentProviderId if set, otherwise fall back to service provider
         const pid = (order as any).fulfillmentProviderId ?? order.service.providerId;
         if (!byProvider.has(pid)) byProvider.set(pid, []);
         byProvider.get(pid)!.push(order);
       }
 
       for (const [providerId, orders] of byProvider) {
-        // Load the actual fulfillment provider
         const provider = await prisma.provider.findUnique({ where: { id: providerId } });
         if (!provider || !provider.isEnabled) continue;
 
         const client = new ProviderClient(provider);
-
         const CHUNK = 100;
+
         for (let i = 0; i < orders.length; i += CHUNK) {
           const chunk = orders.slice(i, i + CHUNK);
           const ids = chunk.map((o) => o.providerOrderId!);
@@ -60,26 +56,33 @@ export function createStatusPollWorker(redis: Redis, prisma: PrismaClient) {
 
             for (const order of chunk) {
               const provId = order.providerOrderId!;
-              const data = statuses[provId];
+              const data = statuses[provId] as any;
               if (!data || data.error) continue;
 
               const newStatus = PROVIDER_STATUS_MAP[data.status ?? ""] ?? order.status;
               const remains = data.remains ?? order.remains ?? 0;
+              // Fix #17: update startCount from provider when available
+              const startCount = (data.start_count !== undefined && data.start_count !== null)
+                ? Number(data.start_count)
+                : order.startCount;
 
-              if (newStatus === order.status && remains === (order.remains ?? 0)) continue;
+              // Skip if nothing changed
+              if (
+                newStatus === order.status &&
+                remains === (order.remains ?? 0) &&
+                startCount === order.startCount
+              ) continue;
 
               if (TERMINAL_STATUSES.has(newStatus) && REFUND_ON.has(newStatus) && remains > 0) {
-                // Partial/cancelled — refund undelivered portion atomically
                 const totalCost = new Decimal(order.costUsd.toString());
                 const refundRatio = new Decimal(remains).dividedBy(order.quantity);
                 const refundAmount = totalCost.times(refundRatio).toDecimalPlaces(8);
 
                 if (refundAmount.greaterThan(0)) {
-                  // Single transaction: update order + credit wallet (no nesting)
                   await prisma.$transaction(async (tx) => {
                     await tx.order.update({
                       where: { id: order.id },
-                      data: { status: newStatus as never, remains },
+                      data: { status: newStatus as never, remains, startCount } as never,
                     });
 
                     await creditWalletTx(
@@ -91,6 +94,7 @@ export function createStatusPollWorker(redis: Redis, prisma: PrismaClient) {
                         description: `Refund: ${remains} units undelivered for order #${order.id}`,
                         orderId: order.id,
                         inrRate: new Decimal(order.inrRateAtOrder.toString()),
+                        paymentGatewayId: `poll-refund:${order.id}`,
                       },
                     );
 
@@ -105,7 +109,7 @@ export function createStatusPollWorker(redis: Redis, prisma: PrismaClient) {
               } else {
                 await prisma.order.update({
                   where: { id: order.id },
-                  data: { status: newStatus as never, remains },
+                  data: { status: newStatus as never, remains, startCount } as never,
                 });
               }
             }

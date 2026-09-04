@@ -77,11 +77,16 @@ export default async function adminProvidersRoute(fastify: FastifyInstance) {
       const provider = await fastify.prisma.provider.findUnique({ where: { id } });
       if (!provider) throw new NotFoundError("Provider not found");
 
-      // Get global markup
+      // Use serviceMarkupPercent for selling price — NOT depositMarkupPercent
       const currencySettings = await fastify.prisma.currencySettings.findUniqueOrThrow({
         where: { id: "singleton" },
-      });
-      const globalMarkup = new Decimal(currencySettings.markupPercent.toString());
+      }) as any;
+      // serviceMarkupPercent is the correct field for service pricing
+      const globalMarkup = new Decimal(
+        currencySettings.serviceMarkupPercent?.toString() ??
+        currencySettings.markupPercent?.toString() ??
+        "0"
+      );
 
       const client = new ProviderClient(provider);
       const providerServices = await client.getServices();
@@ -91,8 +96,8 @@ export default async function adminProvidersRoute(fastify: FastifyInstance) {
 
       for (const ps of providerServices) {
         const providerServiceId = ps.service.toString();
-        const costPrice = new Decimal(ps.rate).dividedBy(1000); // rate is per 1000 → per unit cost
-        const costPriceUsd = costPrice; // provider rate IS per 1000 — keep as-is
+        const costPrice = new Decimal(ps.rate).dividedBy(1000); // rate is per 1000 â†’ per unit cost
+        const costPriceUsd = costPrice; // provider rate IS per 1000 â€” keep as-is
         const sellingPriceUsd = costPriceUsd.times(
           new Decimal(1).plus(globalMarkup.dividedBy(100)),
         );
@@ -141,7 +146,7 @@ export default async function adminProvidersRoute(fastify: FastifyInstance) {
               minQuantity: Number(ps.min),
               maxQuantity: Number(ps.max),
               supportsRefill: ps.refill ?? false,
-              isEnabled: true, // Auto-enable on sync — admin can disable individually if needed
+              isEnabled: true, // Auto-enable on sync â€” admin can disable individually if needed
             },
           });
           created++;

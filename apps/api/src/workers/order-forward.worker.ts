@@ -25,6 +25,16 @@ export function createOrderForwardWorker(redis: Redis, prisma: PrismaClient) {
         return;
       }
 
+      // Idempotency: if order already has a providerOrderId, it was forwarded on a prior attempt
+      // Do NOT re-send to provider — just ensure status is PROCESSING
+      if (order.providerOrderId) {
+        console.log(`[order-forward] Order ${orderId} already forwarded (providerOrderId=${order.providerOrderId}), updating status`);
+        if (order.status === "PENDING") {
+          await prisma.order.update({ where: { id: orderId }, data: { status: "PROCESSING" } });
+        }
+        return;
+      }
+
       if (order.status !== "PENDING") {
         console.log(`[order-forward] Order ${orderId} already processed (${order.status})`);
         return;
@@ -32,21 +42,12 @@ export function createOrderForwardWorker(redis: Redis, prisma: PrismaClient) {
 
       // ── Try PRIMARY provider ─────────────────────────────────
       const primaryClient = new ProviderClient(order.service.provider);
-      const result = await primaryClient.addOrder(
-        order.service.providerServiceId,
-        order.link,
-        order.quantity,
-      );
+      const result = await primaryClient.addOrder(order.service.providerServiceId, order.link, order.quantity);
 
       if (!("error" in result)) {
-        // Primary succeeded — store fulfillment provider
         await prisma.order.update({
           where: { id: orderId },
-          data: {
-            status: "PROCESSING",
-            providerOrderId: result.order.toString(),
-            fulfillmentProviderId: order.service.providerId,
-          } as never,
+          data: { status: "PROCESSING", providerOrderId: result.order.toString(), fulfillmentProviderId: order.service.providerId } as never,
         });
         console.log(`[order-forward] Order ${orderId} forwarded via PRIMARY → ${result.order}`);
         return;
@@ -66,14 +67,9 @@ export function createOrderForwardWorker(redis: Redis, prisma: PrismaClient) {
           const backupResult = await backupClient.addOrder(backupServiceId, order.link, order.quantity);
 
           if (!("error" in backupResult)) {
-            // Backup succeeded — store which provider actually fulfilled this order
             await prisma.order.update({
               where: { id: orderId },
-              data: {
-                status: "PROCESSING",
-                providerOrderId: backupResult.order.toString(),
-                fulfillmentProviderId: backupProviderId, // Track actual provider
-              } as never,
+              data: { status: "PROCESSING", providerOrderId: backupResult.order.toString(), fulfillmentProviderId: backupProviderId } as never,
             });
             console.log(`[order-forward] Order ${orderId} forwarded via BACKUP provider ${backupProviderId}`);
             return;
@@ -89,56 +85,47 @@ export function createOrderForwardWorker(redis: Redis, prisma: PrismaClient) {
   );
 
   // Final failure — all retries exhausted → cancel + refund (flat transaction, no nesting)
-  worker.on(
-    "failed",
-    async (
-      job: { data: OrderForwardJobData; opts: { attempts?: number }; attemptsMade: number } | undefined,
-      err: Error,
-    ) => {
-      if (!job || (job.opts.attempts && job.attemptsMade < job.opts.attempts)) return;
+  worker.on("failed", async (
+    job: { data: OrderForwardJobData; opts: { attempts?: number }; attemptsMade: number } | undefined,
+    err: Error,
+  ) => {
+    if (!job || (job.opts.attempts && job.attemptsMade < job.opts.attempts)) return;
 
-      const orderId = job.data.orderId;
-      console.error(`[order-forward] Order ${orderId} exhausted all retries:`, err.message);
+    const orderId = job.data.orderId;
+    console.error(`[order-forward] Order ${orderId} exhausted all retries:`, err.message);
 
-      try {
-        const order = await prisma.order.findUnique({
-          where: { id: orderId },
-          select: { costUsd: true, userId: true, inrRateAtOrder: true, status: true },
+    try {
+      const order = await prisma.order.findUnique({
+        where: { id: orderId },
+        select: { costUsd: true, userId: true, inrRateAtOrder: true, status: true },
+      });
+
+      if (!order || order.status === "CANCELLED") return;
+
+      await prisma.$transaction(async (tx) => {
+        await tx.order.update({ where: { id: orderId }, data: { status: "CANCELLED" } });
+        await creditWalletTx(
+          tx as Parameters<typeof creditWalletTx>[0],
+          order.userId,
+          new Decimal(order.costUsd.toString()),
+          {
+            type: "REFUND",
+            description: `Auto-refund: order could not be processed (#${orderId})`,
+            orderId,
+            inrRate: new Decimal(order.inrRateAtOrder.toString()),
+            paymentGatewayId: `auto-refund:${orderId}`,
+          },
+        );
+        await tx.notification.create({
+          data: { userId: order.userId, message: `Your order #${orderId} could not be processed and has been fully refunded.` },
         });
+      });
 
-        if (!order || order.status === "CANCELLED") return;
-
-        // Single flat transaction — no nested prisma.$transaction calls
-        await prisma.$transaction(async (tx) => {
-          await tx.order.update({ where: { id: orderId }, data: { status: "CANCELLED" } });
-
-          // Use creditWalletTx (operates inside existing tx — no nesting)
-          await creditWalletTx(
-            tx as Parameters<typeof creditWalletTx>[0],
-            order.userId,
-            new Decimal(order.costUsd.toString()),
-            {
-              type: "REFUND",
-              description: `Auto-refund: order could not be processed (#${orderId})`,
-              orderId,
-              inrRate: new Decimal(order.inrRateAtOrder.toString()),
-            },
-          );
-
-          await tx.notification.create({
-            data: {
-              userId: order.userId,
-              message: `Your order #${orderId} could not be processed and has been fully refunded.`,
-            },
-          });
-        });
-
-        console.log(`[order-forward] Refunded order ${orderId}`);
-      } catch (refundErr) {
-        console.error(`[order-forward] Refund failed for ${orderId}:`, refundErr);
-      }
-    },
-  );
+      console.log(`[order-forward] Refunded order ${orderId}`);
+    } catch (refundErr) {
+      console.error(`[order-forward] Refund failed for ${orderId}:`, refundErr);
+    }
+  });
 
   return worker;
 }

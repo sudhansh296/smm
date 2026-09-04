@@ -133,8 +133,17 @@ export default async function loginRoute(fastify: FastifyInstance) {
       maxAge: 7 * 24 * 60 * 60,
     });
 
+    // HttpOnly access token cookie — not readable by browser JS (XSS protection)
+    reply.setCookie("accessToken", accessToken, {
+      httpOnly: true,
+      secure: process.env["NODE_ENV"] === "production",
+      sameSite: "lax",
+      path: "/",
+      maxAge: 900,
+    });
+
     return reply.send({
-      accessToken,
+      accessToken, // also in body for backward compat (API v2 clients that use Authorization header)
       expiresIn: 900,
       user: {
         id: user.id,

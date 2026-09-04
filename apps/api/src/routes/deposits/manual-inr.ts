@@ -1,15 +1,22 @@
-﻿import type { FastifyInstance } from "fastify";
+import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { Decimal } from "decimal.js";
 import { getEffectiveInrRate } from "../../services/currency.service.js";
+import { ValidationError } from "../../lib/errors.js";
 
 export default async function manualInrDepositRoute(fastify: FastifyInstance) {
   fastify.post("/manual-inr", { preHandler: [fastify.authenticate] }, async (request, reply) => {
     const { amountInr, utrNumber, note } = z.object({
-      amountInr: z.coerce.number().min(50, "Minimum ₹50").max(100000),
-      utrNumber: z.string().min(6, "Enter valid UTR / Transaction ID"),
-      note: z.string().optional(),
+      amountInr: z.coerce.number().min(50, "Minimum Rs.50").max(100000),
+      utrNumber: z.string().min(6, "Enter valid UTR / Transaction ID").max(50),
+      note: z.string().max(200).optional(),
     }).parse(request.body);
+
+    // Prevent same UTR being submitted twice — catches accidental double-submission
+    const existing = await fastify.prisma.depositRequest.findFirst({
+      where: { txId: utrNumber, method: "MANUAL_INR" } as any,
+    });
+    if (existing) throw new ValidationError("This UTR/Transaction ID has already been submitted");
 
     const effectiveRate = await getEffectiveInrRate(fastify.redis, fastify.prisma);
     const amountUsd = new Decimal(amountInr).dividedBy(effectiveRate).toDecimalPlaces(8);
@@ -37,4 +44,3 @@ export default async function manualInrDepositRoute(fastify: FastifyInstance) {
     });
   });
 }
-

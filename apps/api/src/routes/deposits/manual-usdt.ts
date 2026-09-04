@@ -1,8 +1,8 @@
-﻿import type { FastifyInstance } from "fastify";
+import type { FastifyInstance } from "fastify";
 import { z } from "zod";
+import { ValidationError } from "../../lib/errors.js";
 
 export default async function manualUsdtDepositRoute(fastify: FastifyInstance) {
-  // Get wallet addresses for manual deposit
   fastify.get("/usdt-address", { preHandler: [fastify.authenticate] }, async (_request, reply) => {
     return reply.send({
       trc20: process.env.USDT_WALLET_TRC20 ?? "Not configured — contact admin",
@@ -11,13 +11,18 @@ export default async function manualUsdtDepositRoute(fastify: FastifyInstance) {
     });
   });
 
-  // Submit manual USDT deposit
   fastify.post("/manual-usdt", { preHandler: [fastify.authenticate] }, async (request, reply) => {
     const { amountUsdt, txHash, network } = z.object({
       amountUsdt: z.coerce.number().min(1, "Minimum $1 USDT").max(100000),
-      txHash: z.string().min(10, "Enter valid transaction hash"),
+      txHash: z.string().min(10, "Enter valid transaction hash").max(100),
       network: z.enum(["TRC20", "ERC20", "BEP20"]).default("TRC20"),
     }).parse(request.body);
+
+    // Prevent same TxHash being submitted twice
+    const existing = await fastify.prisma.depositRequest.findFirst({
+      where: { txId: txHash, method: "MANUAL_USDT" } as any,
+    });
+    if (existing) throw new ValidationError("This transaction hash has already been submitted");
 
     const deposit = await fastify.prisma.depositRequest.create({
       data: {
@@ -35,10 +40,7 @@ export default async function manualUsdtDepositRoute(fastify: FastifyInstance) {
     return reply.status(201).send({
       depositId: deposit.id,
       message: "USDT deposit submitted. Admin will verify on blockchain and credit your wallet.",
-      amountUsdt,
-      txHash,
-      network,
+      amountUsdt, txHash, network,
     });
   });
 }
-

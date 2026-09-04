@@ -16,6 +16,7 @@ export default async function logoutRoute(fastify: FastifyInstance) {
       }
 
       reply.clearCookie("refreshToken", { path: "/auth/refresh" });
+      reply.clearCookie("accessToken", { path: "/" });
       return reply.send({ message: "Logged out successfully" });
     },
   );

@@ -13,7 +13,7 @@ export function createRefillWorker(redis: Redis, prisma: PrismaClient) {
       const order = await prisma.order.findUnique({
         where: { id: orderId },
         include: { service: { include: { provider: true } } },
-      });
+      }) as any;
 
       if (!order) {
         console.warn(`[refill] Order ${orderId} not found`);
@@ -24,41 +24,39 @@ export function createRefillWorker(redis: Redis, prisma: PrismaClient) {
         throw new Error("No provider order ID — cannot request refill");
       }
 
-      const client = new ProviderClient(order.service.provider);
+      // Use the FULFILLMENT provider — the one that actually placed the order
+      // This may differ from service.provider if backup provider was used
+      const fulfillmentProviderId = order.fulfillmentProviderId ?? order.service.providerId;
+      let provider = order.service.provider;
+
+      if (fulfillmentProviderId !== order.service.providerId) {
+        const altProvider = await prisma.provider.findUnique({ where: { id: fulfillmentProviderId } });
+        if (altProvider) provider = altProvider;
+        else {
+          console.warn(`[refill] Fulfillment provider ${fulfillmentProviderId} not found, using service provider`);
+        }
+      }
+
+      const client = new ProviderClient(provider);
       const result = await client.requestRefill(order.providerOrderId);
 
       if ("error" in result) {
-        // Mark refill failed and notify user
-        await prisma.order.update({
-          where: { id: orderId },
-          data: { refillStatus: "failed" },
-        });
-
+        await prisma.order.update({ where: { id: orderId }, data: { refillStatus: "failed" } });
         await prisma.notification.create({
-          data: {
-            userId: order.userId,
-            message: `Refill failed for order #${orderId}: ${result.error}`,
-          },
+          data: { userId: order.userId, message: `Refill failed for order #${orderId}: ${result.error}` },
         });
-
         throw new Error(`Refill rejected by provider: ${result.error}`);
       }
 
       await prisma.order.update({
         where: { id: orderId },
-        data: {
-          providerRefillId: result.refill.toString(),
-          refillStatus: "processing",
-        },
+        data: { providerRefillId: result.refill.toString(), refillStatus: "processing" },
       });
 
-      console.log(
-        `[refill] Order ${orderId} refill submitted → provider refill ID ${result.refill}`,
-      );
+      console.log(`[refill] Order ${orderId} refill submitted → provider refill ID ${result.refill}`);
     },
     { connection: redis, skipVersionCheck: true, concurrency: 3 },
   );
 
   return worker;
 }
-
