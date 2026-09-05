@@ -24,6 +24,16 @@ export default async function adminSettingsRoute(fastify: FastifyInstance) {
           siteName: z.string().min(1).max(100).optional(),
           logoUrl: z.string().url().nullable().optional(),
           maintenanceMode: z.boolean().optional(),
+          // Bank transfer details
+          bankAccountName:   z.string().max(100).nullable().optional(),
+          bankAccountNumber: z.string().max(30).nullable().optional(),
+          bankIfsc:          z.string().max(20).nullable().optional(),
+          bankName:          z.string().max(100).nullable().optional(),
+          upiId:             z.string().max(100).nullable().optional(),
+          // USDT wallet addresses
+          usdtTrc20: z.string().max(100).nullable().optional(),
+          usdtErc20: z.string().max(100).nullable().optional(),
+          usdtBep20: z.string().max(100).nullable().optional(),
         })
         .parse(request.body);
 
@@ -33,6 +43,14 @@ export default async function adminSettingsRoute(fastify: FastifyInstance) {
           ...(data.siteName !== undefined && { siteName: data.siteName }),
           ...(data.logoUrl !== undefined && { logoUrl: data.logoUrl }),
           ...(data.maintenanceMode !== undefined && { maintenanceMode: data.maintenanceMode }),
+          ...(data.bankAccountName !== undefined && { bankAccountName: data.bankAccountName }),
+          ...(data.bankAccountNumber !== undefined && { bankAccountNumber: data.bankAccountNumber }),
+          ...(data.bankIfsc !== undefined && { bankIfsc: data.bankIfsc }),
+          ...(data.bankName !== undefined && { bankName: data.bankName }),
+          ...(data.upiId !== undefined && { upiId: data.upiId }),
+          ...(data.usdtTrc20 !== undefined && { usdtTrc20: data.usdtTrc20 }),
+          ...(data.usdtErc20 !== undefined && { usdtErc20: data.usdtErc20 }),
+          ...(data.usdtBep20 !== undefined && { usdtBep20: data.usdtBep20 }),
         },
       });
 

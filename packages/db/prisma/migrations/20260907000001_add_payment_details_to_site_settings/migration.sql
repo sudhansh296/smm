@@ -1,0 +1,9 @@
+-- Add bank transfer and USDT wallet details to site_settings
+ALTER TABLE "site_settings" ADD COLUMN IF NOT EXISTS "bankAccountName"   TEXT;
+ALTER TABLE "site_settings" ADD COLUMN IF NOT EXISTS "bankAccountNumber" TEXT;
+ALTER TABLE "site_settings" ADD COLUMN IF NOT EXISTS "bankIfsc"          TEXT;
+ALTER TABLE "site_settings" ADD COLUMN IF NOT EXISTS "bankName"          TEXT;
+ALTER TABLE "site_settings" ADD COLUMN IF NOT EXISTS "upiId"             TEXT;
+ALTER TABLE "site_settings" ADD COLUMN IF NOT EXISTS "usdtTrc20"         TEXT;
+ALTER TABLE "site_settings" ADD COLUMN IF NOT EXISTS "usdtErc20"         TEXT;
+ALTER TABLE "site_settings" ADD COLUMN IF NOT EXISTS "usdtBep20"         TEXT;

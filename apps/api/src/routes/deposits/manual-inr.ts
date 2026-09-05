@@ -5,16 +5,27 @@ import { getEffectiveInrRate } from "../../services/currency.service.js";
 import { ValidationError } from "../../lib/errors.js";
 
 export default async function manualInrDepositRoute(fastify: FastifyInstance) {
+  // Return admin-configured bank details for display on deposit page
+  fastify.get("/bank-details", { preHandler: [fastify.authenticate] }, async (_request, reply) => {
+    const settings = await fastify.prisma.siteSettings.findUnique({ where: { id: "singleton" } }) as any;
+    return reply.send({
+      accountName:   settings?.bankAccountName   ?? null,
+      accountNumber: settings?.bankAccountNumber ?? null,
+      ifsc:          settings?.bankIfsc          ?? null,
+      bankName:      settings?.bankName          ?? null,
+      upiId:         settings?.upiId             ?? null,
+    });
+  });
+
   fastify.post("/manual-inr", { preHandler: [fastify.authenticate] }, async (request, reply) => {
     const parsed = z.object({
-      amountInr: z.coerce.number().min(50, "Minimum ₹50").max(100000),
+      amountInr: z.coerce.number().min(50, "Minimum Rs.50").max(100000),
       utrNumber: z.string().min(6, "Enter valid UTR / Transaction ID").max(50),
       note:      z.string().max(200).optional(),
     }).parse(request.body);
 
     const amountInr = parsed.amountInr;
     const note      = parsed.note;
-    // Fix: normalize  --  let as new const to avoid const reassignment error
     const utrNumber = parsed.utrNumber.trim().toUpperCase();
 
     const existing = await fastify.prisma.depositRequest.findFirst({

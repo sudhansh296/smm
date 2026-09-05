@@ -3,11 +3,14 @@ import { z } from "zod";
 import { ValidationError } from "../../lib/errors.js";
 
 export default async function manualUsdtDepositRoute(fastify: FastifyInstance) {
+  // Public endpoint -- no auth needed to show deposit address to user
   fastify.get("/usdt-address", { preHandler: [fastify.authenticate] }, async (_request, reply) => {
+    const settings = await fastify.prisma.siteSettings.findUnique({ where: { id: "singleton" } }) as any;
+
     return reply.send({
-      trc20: process.env["USDT_WALLET_TRC20"] ?? "Not configured  --  contact admin",
-      erc20: process.env["USDT_WALLET_ERC20"] ?? "Not configured  --  contact admin",
-      bep20: process.env["USDT_WALLET_BEP20"] ?? "Not configured  --  contact admin",
+      trc20: settings?.usdtTrc20 || process.env["USDT_WALLET_TRC20"] || null,
+      erc20: settings?.usdtErc20 || process.env["USDT_WALLET_ERC20"] || null,
+      bep20: settings?.usdtBep20 || process.env["USDT_WALLET_BEP20"] || null,
     });
   });
 
@@ -20,8 +23,7 @@ export default async function manualUsdtDepositRoute(fastify: FastifyInstance) {
 
     const amountUsdt = parsed.amountUsdt;
     const network    = parsed.network;
-    // Fix: normalize  --  new const avoids const reassignment error
-    const txHash = parsed.txHash.trim().toLowerCase();
+    const txHash     = parsed.txHash.trim().toLowerCase();
 
     const existing = await fastify.prisma.depositRequest.findFirst({
       where: { txId: txHash, method: "MANUAL_USDT" } as any,
