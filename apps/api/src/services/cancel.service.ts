@@ -121,13 +121,32 @@ export async function cancelOrder(
   const providerResult = await attemptProviderCancel(provider, order.providerOrderId);
 
   if (providerResult === "cancelled") {
-    // Fix #2: use fulfillment provider for fresh status
+    // Fix #2: fetch fresh remains from fulfillment provider before refunding
+    // If status fetch fails (network error), remains is unknown.
+    // Unknown remains = we don't know how much was delivered = do NOT immediately refund.
+    // Stay CANCEL_REQUESTED and let status-poll finalize with confirmed data.
     let freshRemains: number | undefined;
+    let statusFetchSuccess = false;
     try {
       const client = new ProviderClient(provider);
       const freshStatus = await client.getStatus(order.providerOrderId);
       freshRemains = freshStatus.remains !== undefined ? Number(freshStatus.remains) : undefined;
-    } catch { /* network error — full refund as safe default */ }
+      statusFetchSuccess = true;
+    } catch (err) {
+      console.warn(`[cancel-service] Fresh status fetch failed for ${orderId}:`, err);
+    }
+
+    if (!statusFetchSuccess) {
+      // Cannot determine how much was delivered — stay CANCEL_REQUESTED
+      // Status-poll will finalize with confirmed data when network recovers
+      console.warn(`[cancel-service] Order ${orderId}: cancel confirmed but status unknown — staying CANCEL_REQUESTED for safe poll`);
+      return {
+        status: "CANCEL_REQUESTED",
+        refunded: false,
+        message: "Cancellation accepted by provider. Refund will be calculated once delivery status is confirmed.",
+      };
+    }
+
     await finaliseCancel(prisma, orderId, order, freshRemains);
     return { status: "CANCELLED", refunded: true, message: "Order cancelled and refunded" };
   }

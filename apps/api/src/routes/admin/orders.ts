@@ -2,8 +2,18 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { Decimal } from "decimal.js";
 import { ProviderClient } from "../../services/provider.service.js";
-import { NotFoundError, ValidationError } from "../../lib/errors.js";
+import { NotFoundError, ValidationError, AlreadyRefundedError } from "../../lib/errors.js";
 import { refundOrderTx } from "../../services/wallet.service.js";
+
+// Fix #3: shared refund calculator with clamping — prevents >100% refunds from bad provider data
+function calcSyncRefund(costUsd: string, quantity: number, remains: number): Decimal {
+  const total = new Decimal(costUsd);
+  // Clamp: remains can never produce more than a full refund
+  const clampedRemains = Math.min(remains, quantity);
+  if (clampedRemains <= 0)       return new Decimal(0);  // 0 remains = all delivered = no refund
+  if (clampedRemains >= quantity) return total;           // everything undelivered = full refund
+  return total.times(new Decimal(clampedRemains).dividedBy(quantity)).toDecimalPlaces(8);
+}
 
 export default async function adminOrdersRoute(fastify: FastifyInstance) {
 
@@ -45,19 +55,19 @@ export default async function adminOrdersRoute(fastify: FastifyInstance) {
 
     return reply.send({
       orders: orders.map((o: any) => ({
-        id:                   o.id,
-        userId:               o.userId,
-        userEmail:            o.user.email,
-        serviceName:          o.service.name,
-        providerName:         o.service.provider.name,
-        link:                 o.link,
-        quantity:             o.quantity,
-        costUsd:              o.costUsd.toString(),
-        status:               o.status,
-        providerOrderId:      o.providerOrderId ?? null,
+        id:                    o.id,
+        userId:                o.userId,
+        userEmail:             o.user.email,
+        serviceName:           o.service.name,
+        providerName:          o.service.provider.name,
+        link:                  o.link,
+        quantity:              o.quantity,
+        costUsd:               o.costUsd.toString(),
+        status:                o.status,
+        providerOrderId:       o.providerOrderId ?? null,
         fulfillmentProviderId: o.fulfillmentProviderId ?? null,
-        createdAt:            o.createdAt.toISOString(),
-        updatedAt:            o.updatedAt.toISOString(),
+        createdAt:             o.createdAt.toISOString(),
+        updatedAt:             o.updatedAt.toISOString(),
       })),
       total, page: q.page, limit: q.limit,
       totalPages: Math.ceil(total / q.limit),
@@ -65,8 +75,11 @@ export default async function adminOrdersRoute(fastify: FastifyInstance) {
   });
 
   // ── Manual status update ───────────────────────────────────────────────────
-  // CANCELLED and REFUNDED are blocked — they require wallet changes.
-  // Use /cancel or /refund endpoints for those.
+  // Fix #4: only allow safe operational statuses — no financial/terminal states
+  // CANCELLED/REFUNDED → use /refund endpoint
+  // PARTIAL            → use /sync endpoint (provider-confirmed amounts)
+  // FORWARDING         → internal state, should not be manually set
+  // CANCEL_REQUESTED   → internal state, should use cancel service
   fastify.patch(
     "/orders/:id/status",
     { preHandler: [fastify.authenticateAdmin] },
@@ -74,14 +87,12 @@ export default async function adminOrdersRoute(fastify: FastifyInstance) {
       const { id } = z.object({ id: z.string() }).parse(request.params);
 
       const { status } = z.object({
+        // Fix #4: only operational statuses — no financial states
         status: z.enum([
           "PENDING",
-          "FORWARDING",
           "PROCESSING",
           "IN_PROGRESS",
           "COMPLETED",
-          "PARTIAL",
-          "CANCEL_REQUESTED",
         ]),
       }).parse(request.body);
 
@@ -129,9 +140,9 @@ export default async function adminOrdersRoute(fastify: FastifyInstance) {
           tx as Parameters<typeof refundOrderTx>[0],
           id,
           {
-            userId:    order.userId,
-            amountUsd: refundAmount,
-            inrRate:   new Decimal(order.inrRateAtOrder.toString()),
+            userId:      order.userId,
+            amountUsd:   refundAmount,
+            inrRate:     new Decimal(order.inrRateAtOrder.toString()),
             description: reason,
           },
         );
@@ -145,9 +156,9 @@ export default async function adminOrdersRoute(fastify: FastifyInstance) {
       });
 
       return reply.send({
-        message:       `Refunded $${refundAmount.toFixed(2)} to ${order.user.email}`,
-        refundAmount:  refundAmount.toFixed(2),
-        orderId:       id,
+        message:      `Refunded $${refundAmount.toFixed(2)} to ${order.user.email}`,
+        refundAmount: refundAmount.toFixed(2),
+        orderId:      id,
       });
     },
   );
@@ -169,7 +180,7 @@ export default async function adminOrdersRoute(fastify: FastifyInstance) {
         return reply.send({ message: "No provider order ID — cannot sync" });
       }
 
-      // Use fulfillment provider (may differ from service.provider if backup was used)
+      // Use actual fulfillment provider (may be backup)
       const fulfillmentProviderId = order.fulfillmentProviderId ?? order.service.providerId;
       let provider = order.service.provider;
       if (fulfillmentProviderId !== order.service.providerId) {
@@ -191,7 +202,9 @@ export default async function adminOrdersRoute(fastify: FastifyInstance) {
       };
 
       const mappedStatus  = providerStatus.status ? STATUS_MAP[providerStatus.status] ?? null : null;
-      const newRemains    = providerStatus.remains    ?? order.remains    ?? 0;
+      // Fix #3: clamp remains to [0, quantity] to prevent broken provider data causing >100% refund
+      const rawRemains    = providerStatus.remains ?? order.remains ?? 0;
+      const newRemains    = Math.max(0, Math.min(rawRemains, order.quantity));
       const newStartCount = providerStatus.start_count ?? order.startCount;
 
       // No status change — just update counters
@@ -203,12 +216,11 @@ export default async function adminOrdersRoute(fastify: FastifyInstance) {
         return reply.send({ providerStatus, localStatusUpdated: null, message: "Counters synced", provider: provider.name });
       }
 
-      // Status changed — apply refund if PARTIAL/CANCELLED with undelivered units
+      // Status changed to PARTIAL or CANCELLED — may need refund
       const REFUND_ON = new Set(["PARTIAL", "CANCELLED"]);
-      if (REFUND_ON.has(mappedStatus) && newRemains > 0 && !order.refundedAt) {
-        const totalCost    = new Decimal(order.costUsd.toString());
-        const refundRatio  = new Decimal(newRemains).dividedBy(order.quantity);
-        const refundAmount = totalCost.times(refundRatio).toDecimalPlaces(8);
+      if (REFUND_ON.has(mappedStatus) && !order.refundedAt) {
+        // Fix #3: use shared refund calculator (with clamping)
+        const refundAmount = calcSyncRefund(order.costUsd.toString(), order.quantity, newRemains);
 
         if (refundAmount.greaterThan(0)) {
           await fastify.prisma.$transaction(async (tx) => {
@@ -216,6 +228,7 @@ export default async function adminOrdersRoute(fastify: FastifyInstance) {
               where: { id },
               data:  { status: mappedStatus as never, startCount: newStartCount, remains: newRemains },
             });
+            // Fix #1: typed catch — only ignore AlreadyRefundedError, let real errors propagate + rollback
             try {
               await refundOrderTx(tx as Parameters<typeof refundOrderTx>[0], id, {
                 userId:      order.userId,
@@ -223,7 +236,13 @@ export default async function adminOrdersRoute(fastify: FastifyInstance) {
                 inrRate:     new Decimal(order.inrRateAtOrder.toString()),
                 description: `Admin sync refund: ${newRemains} units undelivered`,
               });
-            } catch { /* already refunded — skip */ }
+            } catch (err) {
+              if (err instanceof AlreadyRefundedError) {
+                fastify.log.info({ orderId: id }, "Admin sync: order already refunded — skipping wallet credit");
+              } else {
+                throw err; // real error — rollback transaction
+              }
+            }
           });
 
           return reply.send({
@@ -236,7 +255,7 @@ export default async function adminOrdersRoute(fastify: FastifyInstance) {
         }
       }
 
-      // Status changed, no refund needed
+      // Status changed, no refund needed (COMPLETED, or PARTIAL/CANCELLED with 0 remains)
       await fastify.prisma.order.update({
         where: { id },
         data:  { status: mappedStatus as never, startCount: newStartCount, remains: newRemains },
