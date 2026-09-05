@@ -9,7 +9,7 @@ import { ProviderClient } from "../../services/provider.service.js";
 const API_V2_RATE_LIMIT_MAX = 60;
 const API_V2_RATE_WINDOW = 60_000;
 
-// Validate link is a real URL — prevents garbage reaching provider
+// Validate link is a real URL â€” prevents garbage reaching provider
 const linkSchema = z.string().url("Must be a valid URL").max(500);
 
 async function validateApiKey(fastify: FastifyInstance, key: string) {
@@ -21,6 +21,22 @@ async function validateApiKey(fastify: FastifyInstance, key: string) {
   });
   if (!apiKey || apiKey.revokedAt) return null;
   return apiKey.user;
+}
+
+// Standard SMM panel API status vocabulary
+// Internal statuses must be mapped before returning to external clients
+const V2_STATUS_MAP: Record<string, string> = {
+  PENDING:     "Pending",
+  PROCESSING:  "Processing",
+  IN_PROGRESS: "In progress",
+  COMPLETED:   "Completed",
+  PARTIAL:     "Partial",
+  CANCELLED:   "Canceled",
+  REFUNDED:    "Canceled", // refunded orders appear as Canceled to API clients
+};
+
+function toV2Status(internalStatus: string): string {
+  return V2_STATUS_MAP[internalStatus] ?? "Pending";
 }
 
 export default async function apiV2Route(fastify: FastifyInstance) {
@@ -68,7 +84,7 @@ export default async function apiV2Route(fastify: FastifyInstance) {
           return reply.status(400).send({ error: "Missing required parameters: service, link, quantity" });
         }
 
-        // Validate URL server-side — not just frontend
+        // Validate URL server-side â€” not just frontend
         const linkParsed = linkSchema.safeParse(link);
         if (!linkParsed.success) {
           return reply.status(400).send({ error: "Invalid link: must be a valid URL" });
@@ -90,7 +106,7 @@ export default async function apiV2Route(fastify: FastifyInstance) {
         return reply.send({
           charge: new Decimal(order.costUsd.toString()).toFixed(8),
           start_count: order.startCount ?? 0,
-          status: order.status, remains: order.remains ?? 0, currency: "USD",
+          status: toV2Status(order.status), remains: order.remains ?? 0, currency: "USD",
         });
       }
 
@@ -102,7 +118,7 @@ export default async function apiV2Route(fastify: FastifyInstance) {
         for (const id of orderIds) {
           const o = orders.find((x: { id: string }) => x.id === id);
           result[id] = o
-            ? { charge: new Decimal(o.costUsd.toString()).toFixed(8), start_count: o.startCount ?? 0, status: o.status, remains: o.remains ?? 0, currency: "USD" }
+            ? { charge: new Decimal(o.costUsd.toString()).toFixed(8), start_count: o.startCount ?? 0, status: toV2Status(o.status), remains: o.remains ?? 0, currency: "USD" }
             : { error: "Incorrect order ID" };
         }
         return reply.send(result);
@@ -115,7 +131,7 @@ export default async function apiV2Route(fastify: FastifyInstance) {
         if (!order) return reply.status(404).send({ error: "Order not found" });
         if (!order.service.supportsRefill) return reply.status(400).send({ error: "Service does not support refill" });
 
-        // Atomic conditional update — prevents race condition
+        // Atomic conditional update â€” prevents race condition
         const updated = await fastify.prisma.order.updateMany({
           where: {
             id: orderId,

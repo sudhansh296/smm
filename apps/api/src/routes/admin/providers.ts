@@ -6,13 +6,13 @@ import { ProviderClient } from "../../services/provider.service.js";
 import { NotFoundError, ValidationError } from "../../lib/errors.js";
 
 export default async function adminProvidersRoute(fastify: FastifyInstance) {
-  // List providers
+  // List providers — exclude soft-deleted
   fastify.get("/providers", { preHandler: [fastify.authenticateAdmin] }, async (_request, reply) => {
     const providers = await fastify.prisma.provider.findMany({
+      where: { deletedAt: null } as never,
       include: { _count: { select: { services: true } } },
       orderBy: { createdAt: "desc" },
     });
-
     return reply.send(
       providers.map((p: any) => ({
         id: p.id,
@@ -31,21 +31,12 @@ export default async function adminProvidersRoute(fastify: FastifyInstance) {
     { preHandler: [fastify.authenticateAdmin] },
     async (request, reply) => {
       const { name, apiUrl, apiKey } = z
-        .object({
-          name: z.string().min(1).max(100),
-          apiUrl: z.string().url(),
-          apiKey: z.string().min(1),
-        })
+        .object({ name: z.string().min(1).max(100), apiUrl: z.string().url(), apiKey: z.string().min(1) })
         .parse(request.body);
 
       const provider = await fastify.prisma.provider.create({
-        data: {
-          name,
-          apiUrl,
-          apiKeyEncrypted: encryptProviderKey(apiKey),
-        },
+        data: { name, apiUrl, apiKeyEncrypted: encryptProviderKey(apiKey) },
       });
-
       return reply.status(201).send({ id: provider.id, name: provider.name });
     },
   );
@@ -56,13 +47,10 @@ export default async function adminProvidersRoute(fastify: FastifyInstance) {
     { preHandler: [fastify.authenticateAdmin] },
     async (request, reply) => {
       const { id } = z.object({ id: z.string() }).parse(request.params);
-
       const provider = await fastify.prisma.provider.findUnique({ where: { id } });
       if (!provider) throw new NotFoundError("Provider not found");
-
       const client = new ProviderClient(provider);
       const ok = await client.testConnectivity();
-
       return reply.send({ ok, message: ok ? "Provider reachable" : "Provider unreachable" });
     },
   );
@@ -73,19 +61,16 @@ export default async function adminProvidersRoute(fastify: FastifyInstance) {
     { preHandler: [fastify.authenticateAdmin] },
     async (request, reply) => {
       const { id } = z.object({ id: z.string() }).parse(request.params);
-
       const provider = await fastify.prisma.provider.findUnique({ where: { id } });
       if (!provider) throw new NotFoundError("Provider not found");
 
-      // Use serviceMarkupPercent for selling price — NOT depositMarkupPercent
       const currencySettings = await fastify.prisma.currencySettings.findUniqueOrThrow({
         where: { id: "singleton" },
       }) as any;
-      // serviceMarkupPercent is the correct field for service pricing
+      // Use serviceMarkupPercent for selling price — not depositMarkupPercent
       const globalMarkup = new Decimal(
         currencySettings.serviceMarkupPercent?.toString() ??
-        currencySettings.markupPercent?.toString() ??
-        "0"
+        currencySettings.markupPercent?.toString() ?? "0"
       );
 
       const client = new ProviderClient(provider);
@@ -96,44 +81,49 @@ export default async function adminProvidersRoute(fastify: FastifyInstance) {
 
       for (const ps of providerServices) {
         const providerServiceId = ps.service.toString();
-        const costPrice = new Decimal(ps.rate).dividedBy(1000); // rate is per 1000 â†’ per unit cost
-        const costPriceUsd = costPrice; // provider rate IS per 1000 â€” keep as-is
-        const sellingPriceUsd = costPriceUsd.times(
+        const costPriceUsd = new Decimal(ps.rate).dividedBy(1000);
+        // Selling price using GLOBAL markup (applied to new services and services without override)
+        const globalSellingPrice = costPriceUsd.times(
           new Decimal(1).plus(globalMarkup.dividedBy(100)),
         );
 
         const existing = await fastify.prisma.service.findUnique({
-          where: {
-            providerId_providerServiceId: {
-              providerId: id,
-              providerServiceId,
-            },
-          },
+          where: { providerId_providerServiceId: { providerId: id, providerServiceId } },
         });
 
         if (existing) {
+          // Preserve per-service markupOverride — only apply global markup when no override is set
+          let effectiveSellingPrice: Decimal;
+          if (existing.markupOverride !== null) {
+            // Service has a custom markup override — recalculate using that, not the global one
+            const overrideMultiplier = new Decimal(1).plus(
+              new Decimal(existing.markupOverride.toString()).dividedBy(100),
+            );
+            effectiveSellingPrice = costPriceUsd.times(overrideMultiplier).toDecimalPlaces(8);
+          } else {
+            // No override — use global serviceMarkupPercent
+            effectiveSellingPrice = globalSellingPrice;
+          }
+
           await fastify.prisma.service.update({
             where: { id: existing.id },
             data: {
               costPriceUsd: costPriceUsd.toDecimalPlaces(8).toNumber(),
-              sellingPriceUsd: sellingPriceUsd.toDecimalPlaces(8).toNumber(),
+              sellingPriceUsd: effectiveSellingPrice.toDecimalPlaces(8).toNumber(),
               minQuantity: Number(ps.min),
               maxQuantity: Number(ps.max),
               supportsRefill: ps.refill ?? false,
+              // markupOverride intentionally NOT touched — preserved as-is
             },
           });
           updated++;
         } else {
-          // Find or create a default category
-          let category = await fastify.prisma.category.findFirst({
-            where: { name: ps.category },
-          });
+          let category = await fastify.prisma.category.findFirst({ where: { name: ps.category } });
           if (!category) {
             category = await fastify.prisma.category.create({
               data: { name: ps.category, displayOrder: 99 },
             });
           }
-
           await fastify.prisma.service.create({
             data: {
               name: ps.name,
@@ -142,11 +132,11 @@ export default async function adminProvidersRoute(fastify: FastifyInstance) {
               providerId: id,
               providerServiceId,
               costPriceUsd: costPriceUsd.toDecimalPlaces(8).toNumber(),
-              sellingPriceUsd: sellingPriceUsd.toDecimalPlaces(8).toNumber(),
+              sellingPriceUsd: globalSellingPrice.toDecimalPlaces(8).toNumber(),
               minQuantity: Number(ps.min),
               maxQuantity: Number(ps.max),
               supportsRefill: ps.refill ?? false,
-              isEnabled: true, // Auto-enable on sync â€” admin can disable individually if needed
+              isEnabled: true,
             },
           });
           created++;
@@ -168,31 +158,40 @@ export default async function adminProvidersRoute(fastify: FastifyInstance) {
     async (request, reply) => {
       const { id } = z.object({ id: z.string() }).parse(request.params);
       const { isEnabled } = z.object({ isEnabled: z.boolean() }).parse(request.body);
-
-      const provider = await fastify.prisma.provider.update({
-        where: { id },
-        data: { isEnabled },
-      });
-
+      const provider = await fastify.prisma.provider.update({ where: { id }, data: { isEnabled } });
       return reply.send({ id: provider.id, isEnabled: provider.isEnabled });
     },
   );
 
-  // Delete provider (also deletes all its services)
+  // Soft-delete provider — disables it and all its services, sets deletedAt
+  // Hard delete would fail when orders reference services from this provider
   fastify.delete(
     "/providers/:id",
     { preHandler: [fastify.authenticateAdmin] },
     async (request, reply) => {
       const { id } = z.object({ id: z.string() }).parse(request.params);
 
-      // Delete all services linked to this provider first
-      const deleted = await fastify.prisma.service.deleteMany({ where: { providerId: id } });
-      await fastify.prisma.provider.delete({ where: { id } });
+      const provider = await fastify.prisma.provider.findUnique({ where: { id } });
+      if (!provider) throw new NotFoundError("Provider not found");
+
+      const now = new Date();
+
+      // Soft-delete all services under this provider (disable + mark deleted)
+      const softDeleted = await fastify.prisma.service.updateMany({
+        where: { providerId: id, deletedAt: null } as never,
+        data: { isEnabled: false, deletedAt: now } as never,
+      });
+
+      // Soft-delete the provider itself
+      await fastify.prisma.provider.update({
+        where: { id },
+        data: { isEnabled: false, deletedAt: now } as never,
+      });
 
       return reply.send({
-        message: `Provider deleted along with ${deleted.count} services`,
+        message: `Provider archived along with ${softDeleted.count} services`,
+        servicesArchived: softDeleted.count,
       });
     },
   );
 }
-

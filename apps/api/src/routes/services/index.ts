@@ -21,6 +21,7 @@ export default async function serviceRoutes(fastify: FastifyInstance) {
 
       const where = {
         isEnabled: true,
+        deletedAt: null,
         ...(q.categoryId && { categoryId: q.categoryId }),
         ...(q.search && {
           OR: [

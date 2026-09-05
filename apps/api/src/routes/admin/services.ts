@@ -4,7 +4,7 @@ import { Decimal } from "decimal.js";
 import { NotFoundError } from "../../lib/errors.js";
 
 export default async function adminServicesRoute(fastify: FastifyInstance) {
-  // List all services
+  // List all services — exclude soft-deleted
   fastify.get("/services", { preHandler: [fastify.authenticateAdmin] }, async (request, reply) => {
     const { categoryId, providerId } = z
       .object({ categoryId: z.string().optional(), providerId: z.string().optional() })
@@ -12,6 +12,7 @@ export default async function adminServicesRoute(fastify: FastifyInstance) {
 
     const services = await fastify.prisma.service.findMany({
       where: {
+        deletedAt: null,
         ...(categoryId && { categoryId }),
         ...(providerId && { providerId }),
       },
@@ -72,11 +73,9 @@ export default async function adminServicesRoute(fastify: FastifyInstance) {
       const service = await fastify.prisma.service.findUnique({ where: { id } });
       if (!service) throw new NotFoundError("Service not found");
 
-      // Recalculate selling price
       let sellingPriceUsd: number | undefined;
 
       if (data.manualSellingPriceUsd !== undefined && data.manualSellingPriceUsd !== null) {
-        // Manual price set directly — use as-is
         sellingPriceUsd = data.manualSellingPriceUsd;
       } else if (data.markupOverride !== undefined) {
         const currencySettings = await fastify.prisma.currencySettings.findUniqueOrThrow({
@@ -121,12 +120,10 @@ export default async function adminServicesRoute(fastify: FastifyInstance) {
     async (request, reply) => {
       const { id } = z.object({ id: z.string() }).parse(request.params);
       const { isEnabled } = z.object({ isEnabled: z.boolean() }).parse(request.body);
-
       const service = await fastify.prisma.service.update({
         where: { id },
         data: { isEnabled },
       });
-
       return reply.send({ id: service.id, isEnabled: service.isEnabled });
     },
   );
@@ -153,15 +150,18 @@ export default async function adminServicesRoute(fastify: FastifyInstance) {
     },
   );
 
-  // Delete single service
+  // Soft-delete service — sets deletedAt + disables instead of hard DELETE
+  // Hard delete fails when historical orders reference this service row
   fastify.delete(
     "/services/:id",
     { preHandler: [fastify.authenticateAdmin] },
     async (request, reply) => {
       const { id } = z.object({ id: z.string() }).parse(request.params);
-      await fastify.prisma.service.delete({ where: { id } });
+      await fastify.prisma.service.update({
+        where: { id },
+        data: { isEnabled: false, deletedAt: new Date() } as never,
+      });
       return reply.send({ message: "Service deleted" });
     },
   );
 }
-
