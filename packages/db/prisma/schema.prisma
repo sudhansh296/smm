@@ -199,12 +199,6 @@ model Service {
 }
 
 
-enum RefundStatus {
-  REFUND_PENDING
-  REFUND_APPROVED
-  REFUND_CANCELLED
-}
-
 // -----------------------------------------
 // Orders
 // -----------------------------------------
@@ -239,8 +233,6 @@ model Order {
   refillStatus      String?
   refundedAt        DateTime?
   refundedAmountUsd Decimal?    @db.Decimal(18, 8)
-  refundStatus      RefundStatus?
-  refundNote        String?
   createdAt         DateTime    @default(now())
   updatedAt         DateTime    @updatedAt
 
@@ -253,7 +245,6 @@ model Order {
   @@index([createdAt])
   @@index([providerOrderId])
   @@index([userId, status])
-  @@index([refundStatus])
   @@map("orders")
 }
 

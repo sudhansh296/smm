@@ -64,10 +64,6 @@ export default async function adminOrdersRoute(fastify: FastifyInstance) {
         status:                o.status,
         providerOrderId:       o.providerOrderId ?? null,
         fulfillmentProviderId: o.fulfillmentProviderId ?? null,
-        refundStatus:          o.refundStatus ?? null,
-        refundNote:            o.refundNote ?? null,
-        refundedAt:            o.refundedAt?.toISOString() ?? null,
-        refundedAmountUsd:     o.refundedAmountUsd?.toString() ?? null,
         createdAt:             o.createdAt.toISOString(),
         updatedAt:             o.updatedAt.toISOString(),
       })),
@@ -94,13 +90,13 @@ export default async function adminOrdersRoute(fastify: FastifyInstance) {
     },
   );
 
-  // -- Step 1: Initiate refund (sets REFUND_PENDING, no wallet credit yet) ---
+  // -- Admin refund (single-step, immediate wallet credit) -------------------
   fastify.post(
     "/orders/:id/refund",
     { preHandler: [fastify.authenticateAdmin] },
     async (request, reply) => {
-      const { id }   = z.object({ id: z.string() }).parse(request.params);
-      const { note } = z.object({ note: z.string().min(1).default("Admin initiated refund") }).parse(request.body);
+      const { id }     = z.object({ id: z.string() }).parse(request.params);
+      const { reason } = z.object({ reason: z.string().min(1).default("Admin issued refund") }).parse(request.body);
 
       const order = await fastify.prisma.order.findUnique({
         where:   { id },
@@ -108,78 +104,20 @@ export default async function adminOrdersRoute(fastify: FastifyInstance) {
       }) as any;
 
       if (!order) throw new NotFoundError("Order not found");
-
-      // Already fully refunded
       if (order.status === "REFUNDED" || order.refundedAt) {
-        throw new ValidationError("Order has already been refunded");
-      }
-      // Already in pending refund workflow
-      if (order.refundStatus === "REFUND_PENDING") {
-        throw new ValidationError("Refund is already pending approval");
-      }
-      // Cancelled refund can be re-initiated
-      // Any other state: allow initiation
-
-      await fastify.prisma.order.update({
-        where: { id },
-        data: {
-          refundStatus: "REFUND_PENDING" as never,
-          refundNote:   note,
-        } as never,
-      });
-
-      return reply.send({
-        message:  "Refund initiated. Approve or cancel from the order actions.",
-        orderId:  id,
-        refundStatus: "REFUND_PENDING",
-        amount:   new Decimal(order.costUsd.toString()).toFixed(2),
-      });
-    },
-  );
-
-  // -- Step 2a: Approve refund (actually credits wallet) ---------------------
-  fastify.post(
-    "/orders/:id/refund/approve",
-    { preHandler: [fastify.authenticateAdmin] },
-    async (request, reply) => {
-      const { id } = z.object({ id: z.string() }).parse(request.params);
-
-      const order = await fastify.prisma.order.findUnique({
-        where:   { id },
-        include: { user: { select: { email: true } } },
-      }) as any;
-
-      if (!order) throw new NotFoundError("Order not found");
-      if (order.refundStatus !== "REFUND_PENDING") {
-        throw new ValidationError("No pending refund to approve. Initiate refund first.");
-      }
-      if (order.refundedAt) {
         throw new ValidationError("Order has already been refunded");
       }
 
       const refundAmount = new Decimal(order.costUsd.toString());
 
       await fastify.prisma.$transaction(async (tx) => {
-        // Row lock + double-check state
-        const locked = await tx.$queryRaw<Array<{ refundStatus: string | null; refundedAt: Date | null }>>`
-          SELECT "refundStatus", "refundedAt" FROM orders WHERE id = ${id} FOR UPDATE
+        const locked = await tx.$queryRaw<Array<{ status: string; refundedAt: Date | null }>>`
+          SELECT status, "refundedAt" FROM orders WHERE id = ${id} FOR UPDATE
         `;
-        if (!locked[0]) throw new NotFoundError("Order not found");
-        if (locked[0].refundedAt) throw new ValidationError("Already refunded");
-        if (locked[0].refundStatus !== "REFUND_PENDING") {
-          throw new ValidationError("Refund is no longer pending");
-        }
+        if (!locked[0] || locked[0].status === "REFUNDED" || locked[0].refundedAt !== null) return;
 
-        // Mark order as REFUNDED + REFUND_APPROVED
-        await tx.order.update({
-          where: { id },
-          data: {
-            status:       "REFUNDED" as never,
-            refundStatus: "REFUND_APPROVED" as never,
-          } as never,
-        });
+        await tx.order.update({ where: { id }, data: { status: "REFUNDED" as never } });
 
-        // Credit wallet
         await refundOrderTx(
           tx as Parameters<typeof refundOrderTx>[0],
           id,
@@ -187,61 +125,22 @@ export default async function adminOrdersRoute(fastify: FastifyInstance) {
             userId:      order.userId,
             amountUsd:   refundAmount,
             inrRate:     new Decimal(order.inrRateAtOrder.toString()),
-            description: order.refundNote ?? "Admin approved refund",
+            description: reason,
           },
         );
 
         await tx.notification.create({
           data: {
             userId:  order.userId,
-            message: `Your refund of $${refundAmount.toFixed(2)} for order #${id.slice(-8)} has been approved and credited to your wallet.`,
+            message: `Order #${id.slice(-8)} refunded. $${refundAmount.toFixed(2)} added to your wallet.`,
           },
         });
       });
 
       return reply.send({
-        message:      `Refund approved. $${refundAmount.toFixed(2)} credited to ${order.user.email}`,
+        message:      `Refunded $${refundAmount.toFixed(2)} to ${order.user.email}`,
         refundAmount: refundAmount.toFixed(2),
         orderId:      id,
-        refundStatus: "REFUND_APPROVED",
-      });
-    },
-  );
-
-  // -- Step 2b: Cancel refund (no wallet credit, clears pending state) -------
-  fastify.post(
-    "/orders/:id/refund/cancel",
-    { preHandler: [fastify.authenticateAdmin] },
-    async (request, reply) => {
-      const { id } = z.object({ id: z.string() }).parse(request.params);
-
-      const order = await fastify.prisma.order.findUnique({
-        where: { id },
-        select: { id: true, status: true, refundStatus: true, refundedAt: true },
-      }) as any;
-
-      if (!order) throw new NotFoundError("Order not found");
-
-      // Cannot cancel if wallet already credited
-      if (order.refundedAt || order.status === "REFUNDED") {
-        throw new ValidationError("Refund already completed and wallet credited. Use Reverse Refund to undo.");
-      }
-      if (order.refundStatus !== "REFUND_PENDING") {
-        throw new ValidationError("No pending refund to cancel.");
-      }
-
-      await fastify.prisma.order.update({
-        where: { id },
-        data: {
-          refundStatus: "REFUND_CANCELLED" as never,
-          refundNote:   null,
-        } as never,
-      });
-
-      return reply.send({
-        message:      "Refund cancelled. No wallet credit was issued.",
-        orderId:      id,
-        refundStatus: "REFUND_CANCELLED",
       });
     },
   );
