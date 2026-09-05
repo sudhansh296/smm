@@ -8,7 +8,6 @@ import { cancelOrder } from "../../services/cancel.service.js";
 const API_V2_RATE_LIMIT_MAX = 60;
 const API_V2_RATE_WINDOW = 60_000;
 
-// Validate link is a real URL Ã¢â‚¬â€ prevents garbage reaching provider
 const linkSchema = z.string().url("Must be a valid URL").max(500);
 
 async function validateApiKey(fastify: FastifyInstance, key: string) {
@@ -22,18 +21,16 @@ async function validateApiKey(fastify: FastifyInstance, key: string) {
   return apiKey.user;
 }
 
-// Standard SMM panel API status vocabulary
-// Internal statuses must be mapped before returning to external clients
 const V2_STATUS_MAP: Record<string, string> = {
-  PENDING:     "Pending",
-  PROCESSING:  "Processing",
-  IN_PROGRESS: "In progress",
-  COMPLETED:   "Completed",
-  PARTIAL:     "Partial",
-  CANCELLED:   "Canceled",
-  REFUNDED:         "Canceled",
+  PENDING:          "Pending",
   FORWARDING:       "Pending",
+  PROCESSING:       "Processing",
+  IN_PROGRESS:      "In progress",
+  COMPLETED:        "Completed",
+  PARTIAL:          "Partial",
   CANCEL_REQUESTED: "Partial",
+  CANCELLED:        "Canceled",
+  REFUNDED:         "Canceled",
 };
 
 function toV2Status(internalStatus: string): string {
@@ -65,14 +62,21 @@ export default async function apiV2Route(fastify: FastifyInstance) {
     switch (action) {
       case "services": {
         const services = await fastify.prisma.service.findMany({
-          where: { isEnabled: true },
+          where: { isEnabled: true, deletedAt: null } as never,
           include: { category: { select: { name: true } } },
           orderBy: { displayOrder: "asc" },
         });
         return reply.send(services.map((s: any) => ({
-          service: s.id, name: s.name, type: "Default", category: s.category.name,
+          service: s.id,
+          name: s.name,
+          type: "Default",
+          category: s.category.name,
           rate: new Decimal(s.sellingPriceUsd.toString()).times(1000).toFixed(4),
-          min: s.minQuantity, max: s.maxQuantity, refill: s.supportsRefill, cancel: true,
+          min: s.minQuantity,
+          max: s.maxQuantity,
+          refill: s.supportsRefill,
+          // Fix #13: use per-service cancel capability, not blanket true
+          cancel: s.supportsCancel ?? true,
         })));
       }
 
@@ -84,13 +88,10 @@ export default async function apiV2Route(fastify: FastifyInstance) {
         if (!serviceId || !link || !quantity) {
           return reply.status(400).send({ error: "Missing required parameters: service, link, quantity" });
         }
-
-        // Validate URL server-side Ã¢â‚¬â€ not just frontend
         const linkParsed = linkSchema.safeParse(link);
         if (!linkParsed.success) {
           return reply.status(400).send({ error: "Invalid link: must be a valid URL" });
         }
-
         try {
           const result = await createOrder(fastify.prisma, fastify.redis, fastify.queues, user.id, serviceId, link, quantity);
           return reply.send({ order: result.orderId });
@@ -107,7 +108,9 @@ export default async function apiV2Route(fastify: FastifyInstance) {
         return reply.send({
           charge: new Decimal(order.costUsd.toString()).toFixed(8),
           start_count: order.startCount ?? 0,
-          status: toV2Status(order.status), remains: order.remains ?? 0, currency: "USD",
+          status: toV2Status(order.status),
+          remains: order.remains ?? 0,
+          currency: "USD",
         });
       }
 
@@ -132,11 +135,9 @@ export default async function apiV2Route(fastify: FastifyInstance) {
         if (!order) return reply.status(404).send({ error: "Order not found" });
         if (!order.service.supportsRefill) return reply.status(400).send({ error: "Service does not support refill" });
 
-        // Atomic conditional update Ã¢â‚¬â€ prevents race condition
         const updated = await fastify.prisma.order.updateMany({
           where: {
-            id: orderId,
-            userId: user.id,
+            id: orderId, userId: user.id,
             status: { in: ["COMPLETED", "PARTIAL"] },
             refillStatus: { notIn: ["pending", "processing"] },
           },
@@ -159,65 +160,29 @@ export default async function apiV2Route(fastify: FastifyInstance) {
         if (!orderId) return reply.status(400).send({ error: "Missing refill parameter" });
         const order = await fastify.prisma.order.findFirst({ where: { id: orderId, userId: user.id } });
         if (!order) return reply.status(404).send({ error: "Refill not found" });
-        return reply.send({ status: order.refillStatus ?? "Completed" });
+        // Fix #2: null means refill was never requested — not "Completed"
+        if (!order.refillStatus) {
+          return reply.status(404).send({ error: "Refill not found" });
+        }
+        return reply.send({ status: order.refillStatus });
       }
 
       case "cancel": {
+        // Fix #1: use shared cancelOrder() service — same two-phase logic as user/admin routes
+        // No more old code: no refundOrderTx, no ProviderClient, no direct DB writes here
         const orderIds = params["orders"]?.split(",").slice(0, 100) ?? [];
         if (!orderIds.length) return reply.status(400).send({ error: "Missing orders parameter" });
 
         const results = await Promise.all(orderIds.map(async (orderId) => {
-          const order = await fastify.prisma.order.findFirst({
-            where: { id: orderId, userId: user.id },
-            include: { service: { include: { provider: true } } },
-          }) as any;
-
-          if (!order) return { order: orderId, cancel: { error: "Order not found" } };
-          if (!["PENDING", "PROCESSING"].includes(order.status)) {
-            return { order: orderId, cancel: { error: "Cannot cancel this order" } };
-          }
-
           try {
-            await fastify.prisma.$transaction(async (tx) => {
-              // Row-lock to prevent race condition
-              const locked = await tx.$queryRaw<Array<{ status: string; refundedAt: Date | null }>>`
-                SELECT status, "refundedAt" FROM orders WHERE id = ${orderId} FOR UPDATE
-              `;
-              if (!locked[0] || !["PENDING", "PROCESSING"].includes(locked[0].status)) return;
-
-              await tx.order.update({ where: { id: orderId }, data: { status: "CANCELLED" } });
-
-              await refundOrderTx(
-                tx as Parameters<typeof refundOrderTx>[0],
-                orderId,
-                {
-                  userId: order.userId,
-                  amountUsd: new Decimal(order.costUsd.toString()),
-                  inrRate: new Decimal(order.inrRateAtOrder.toString()),
-                  description: `Refund: order #${orderId} cancelled via API v2`,
-                },
-              );
-            });
-
-            // Cancel with fulfillment provider (best-effort, after DB committed)
-            if (order.providerOrderId) {
-              const providerId = order.fulfillmentProviderId ?? order.service.providerId;
-              let provider = order.service.provider;
-              if (providerId !== order.service.providerId) {
-                const alt = await fastify.prisma.provider.findUnique({ where: { id: providerId } });
-                if (alt) provider = alt;
-              }
-              try {
-                const client = new ProviderClient(provider);
-                await client.cancelOrder(order.providerOrderId);
-              } catch (err) {
-                fastify.log.warn({ err, orderId }, "Provider cancel failed (order refunded locally)");
-              }
-            }
-
-            return { order: orderId, cancel: 1 };
-          } catch {
-            return { order: orderId, cancel: { error: "Cancellation failed" } };
+            const result = await cancelOrder(fastify.prisma, orderId, user.id, false);
+            // cancel: 1 = immediate cancel, cancel: {pending:true} = CANCEL_REQUESTED
+            return {
+              order: orderId,
+              cancel: result.status === "CANCELLED" ? 1 : { pending: true, message: result.message },
+            };
+          } catch (err) {
+            return { order: orderId, cancel: { error: err instanceof Error ? err.message : "Cancellation failed" } };
           }
         }));
 

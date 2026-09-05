@@ -105,8 +105,8 @@ export function createOrderForwardWorker(redis: Redis, prisma: PrismaClient) {
           });
 
           if (updated.count === 0) {
-            // Order was set to CANCEL_REQUESTED while provider was processing it
-            // Save providerOrderId so status-poll can track and finalize cancellation
+            // Order was CANCEL_REQUESTED while provider accepted it
+            // Save providerOrderId first, then immediately attempt provider cancel
             await prisma.order.update({
               where: { id: orderId },
               data: {
@@ -115,9 +115,22 @@ export function createOrderForwardWorker(redis: Redis, prisma: PrismaClient) {
               } as never,
             });
             console.warn(
-              `[order-forward] Order ${orderId} was CANCEL_REQUESTED while provider accepted it. ` +
-              `providerOrderId=${result.order} saved. Status-poll will finalize cancellation.`
+              `[order-forward] Order ${orderId} was CANCEL_REQUESTED while provider accepted. ` +
+              `providerOrderId=${result.order} saved. Attempting immediate provider cancel.`
             );
+            // Fix #3: immediately attempt provider cancel now that we have the providerOrderId
+            // This closes the gap where nobody sends the cancel request to provider
+            try {
+              const cancelResult = await primaryClient.cancelOrder(result.order.toString());
+              if ("error" in cancelResult) {
+                console.warn(`[order-forward] Immediate cancel attempt returned error: ${cancelResult.error}. Status-poll will retry.`);
+              } else {
+                console.log(`[order-forward] Immediate provider cancel succeeded for ${orderId}.`);
+                // Status-poll will finalize CANCEL_REQUESTED → CANCELLED + refund when it polls
+              }
+            } catch (cancelErr) {
+              console.warn(`[order-forward] Immediate cancel attempt threw for ${orderId}:`, cancelErr);
+            }
           } else {
             console.log(`[order-forward] Order ${orderId} forwarded via PRIMARY → ${result.order}`);
           }
@@ -141,16 +154,39 @@ export function createOrderForwardWorker(redis: Redis, prisma: PrismaClient) {
             const backupResult = await backupClient.addOrder(backupServiceId, order.link, order.quantity);
 
             if (!("error" in backupResult)) {
-              await prisma.order.update({
-                where: { id: orderId },
+              // Fix #4: backup also uses conditional update to prevent cancel-race overwrite
+              const backupUpdated = await prisma.order.updateMany({
+                where: { id: orderId, status: { in: ["FORWARDING"] } } as never,
                 data: {
                   status: "PROCESSING",
                   providerOrderId: backupResult.order.toString(),
                   fulfillmentProviderId: backupProviderId,
                 } as never,
               });
+
+              if (backupUpdated.count === 0) {
+                // Order was CANCEL_REQUESTED — save providerOrderId and attempt immediate cancel
+                await prisma.order.update({
+                  where: { id: orderId },
+                  data: {
+                    providerOrderId: backupResult.order.toString(),
+                    fulfillmentProviderId: backupProviderId,
+                  } as never,
+                });
+                console.warn(`[order-forward] Order ${orderId} CANCEL_REQUESTED, backup accepted. Attempting immediate cancel.`);
+                try {
+                  const cancelResult = await backupClient.cancelOrder(backupResult.order.toString());
+                  if ("error" in cancelResult) {
+                    console.warn(`[order-forward] Backup immediate cancel error: ${cancelResult.error}`);
+                  }
+                } catch (cancelErr) {
+                  console.warn(`[order-forward] Backup immediate cancel threw:`, cancelErr);
+                }
+              } else {
+                console.log(`[order-forward] Order ${orderId} forwarded via BACKUP → ${backupResult.order}`);
+              }
+
               await redis.del(lockKey);
-              console.log(`[order-forward] Order ${orderId} forwarded via BACKUP → ${backupResult.order}`);
               return;
             }
 

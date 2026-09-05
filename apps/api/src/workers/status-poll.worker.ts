@@ -44,15 +44,14 @@ export function createStatusPollWorker(redis: Redis, prisma: PrismaClient) {
       for (const [providerId, orders] of byProvider) {
         const provider = await prisma.provider.findUnique({ where: { id: providerId } });
 
-        // Fix 5: disabled provider = no NEW orders, but existing orders still need status polling
-        // Only skip if provider row is gone entirely
+        // Fix 5: only skip if provider row is gone entirely.
+        // isEnabled controls new order routing only — all existing active orders
+        // (PROCESSING, IN_PROGRESS, CANCEL_REQUESTED) must continue to be polled
+        // regardless of whether the provider is currently enabled for new orders.
         if (!provider) continue;
 
-        // If provider is disabled, skip for active orders but still poll CANCEL_REQUESTED
-        // (user is waiting for cancellation confirmation regardless of provider status)
-        const ordersToCheck = provider.isEnabled
-          ? orders
-          : orders.filter((o) => (o as any).status === "CANCEL_REQUESTED");
+        // All orders poll regardless of provider.isEnabled
+        const ordersToCheck = orders;
 
         if (!ordersToCheck.length) continue;
 
@@ -109,20 +108,53 @@ export function createStatusPollWorker(redis: Redis, prisma: PrismaClient) {
                   });
                   console.log(`[status-poll] Order ${order.id} CANCEL_REQUESTED → CANCELLED + refunded`);
 
-                } else if (TERMINAL_STATUSES.has(newStatus) && newStatus !== "CANCELLED") {
-                  // Provider completed/partially completed before cancel went through
-                  // Do NOT refund — provider delivered, cancel was too late
+                } else if (newStatus === "PARTIAL" && remains > 0) {
+                  // Fix #7: provider delivered partial before cancel — issue proportional refund
+                  const totalCost    = new Decimal(order.costUsd.toString());
+                  const refundRatio  = new Decimal(remains).dividedBy(order.quantity);
+                  const refundAmount = totalCost.times(refundRatio).toDecimalPlaces(8);
+
+                  await prisma.$transaction(async (tx) => {
+                    await tx.order.update({
+                      where: { id: order.id },
+                      data: { status: "PARTIAL" as never, remains, startCount } as never,
+                    });
+                    if (refundAmount.greaterThan(0)) {
+                      try {
+                        await refundOrderTx(
+                          tx as Parameters<typeof refundOrderTx>[0],
+                          order.id,
+                          {
+                            userId: order.userId,
+                            amountUsd: refundAmount,
+                            inrRate: new Decimal(order.inrRateAtOrder.toString()),
+                            description: `Partial refund: ${remains} units undelivered (cancel was too late)`,
+                          },
+                        );
+                      } catch { /* already refunded */ }
+                    }
+                    await (tx as any).notification.create({
+                      data: {
+                        userId: order.userId,
+                        message: `Order #${order.id.slice(-8)} partially delivered before cancel. $${refundAmount.toFixed(2)} refunded for ${remains} undelivered units.`,
+                      },
+                    });
+                  });
+                  console.log(`[status-poll] Order ${order.id} CANCEL_REQUESTED → PARTIAL + partial refund`);
+
+                } else if (TERMINAL_STATUSES.has(newStatus) && newStatus === "COMPLETED") {
+                  // Provider fully completed before cancel — no refund, cancel was too late
                   await prisma.order.update({
                     where: { id: order.id },
-                    data: { status: newStatus as never, remains, startCount } as never,
+                    data: { status: "COMPLETED" as never, remains, startCount } as never,
                   });
                   await (prisma as any).notification.create({
                     data: {
                       userId: order.userId,
-                      message: `Order #${order.id.slice(-8)} could not be cancelled — provider already ${newStatus.toLowerCase()}.`,
+                      message: `Order #${order.id.slice(-8)} could not be cancelled — provider already completed delivery.`,
                     },
                   });
-                  console.log(`[status-poll] Order ${order.id} CANCEL_REQUESTED → ${newStatus} (provider completed)`);
+                  console.log(`[status-poll] Order ${order.id} CANCEL_REQUESTED → COMPLETED (cancel too late)`);
                 }
                 // Provider still Processing/In_progress — leave as CANCEL_REQUESTED
                 continue;

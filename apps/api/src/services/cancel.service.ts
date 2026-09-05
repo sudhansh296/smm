@@ -190,19 +190,34 @@ async function attemptProviderCancel(prisma: PrismaClient, order: any): Promise<
   }
 }
 
-async function finaliseCancel(prisma: PrismaClient, orderId: string, order: any): Promise<void> {
+async function finaliseCancel(
+  prisma: PrismaClient,
+  orderId: string,
+  order: any,
+  remains?: number,  // if known, refund only undelivered portion
+): Promise<void> {
+  // Fix #8: if provider reports remaining units, only refund undelivered portion
+  // This prevents over-refunding when provider partially delivered before cancel
+  let refundAmount: Decimal;
+  if (remains !== undefined && remains > 0 && remains < order.quantity) {
+    const ratio = new Decimal(remains).dividedBy(order.quantity);
+    refundAmount = new Decimal(order.costUsd.toString()).times(ratio).toDecimalPlaces(8);
+  } else {
+    refundAmount = new Decimal(order.costUsd.toString());
+  }
+
   await prisma.$transaction(async (tx) => {
     await tx.order.update({ where: { id: orderId }, data: { status: "CANCELLED" } });
     await refundOrderTx(tx as Parameters<typeof refundOrderTx>[0], orderId, {
       userId: order.userId,
-      amountUsd: new Decimal(order.costUsd.toString()),
+      amountUsd: refundAmount,
       inrRate: new Decimal(order.inrRateAtOrder.toString()),
       description: `Refund: order #${orderId.slice(-8)} cancelled (provider confirmed)`,
     });
     await tx.notification.create({
       data: {
         userId: order.userId,
-        message: `Order #${orderId.slice(-8)} cancelled. $${new Decimal(order.costUsd.toString()).toFixed(2)} refunded.`,
+        message: `Order #${orderId.slice(-8)} cancelled. $${refundAmount.toFixed(2)} refunded.`,
       },
     });
   });
