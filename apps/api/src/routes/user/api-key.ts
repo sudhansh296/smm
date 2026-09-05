@@ -42,10 +42,10 @@ export default async function apiKeyRoute(fastify: FastifyInstance) {
         },
       });
 
-      // Return raw key ONCE — never stored in plain text
+      // Return raw key ONCE  --  never stored in plain text
       return reply.status(201).send({
         apiKey: raw,
-        message: "Save this key — it will not be shown again.",
+        message: "Save this key  --  it will not be shown again.",
       });
     },
   );

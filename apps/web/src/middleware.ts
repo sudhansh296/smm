@@ -16,14 +16,14 @@ export function middleware(request: NextRequest) {
 
   const isPublic = PUBLIC_PATHS.some((p) => pathname.startsWith(p));
 
-  // Not authenticated — redirect to login
+  // Not authenticated  --  redirect to login
   if (!isPublic && !token) {
     const loginUrl = new URL("/login", request.url);
     loginUrl.searchParams.set("redirect", pathname);
     return NextResponse.redirect(loginUrl);
   }
 
-  // Already authenticated — redirect away from auth pages
+  // Already authenticated  --  redirect away from auth pages
   if (isPublic && token && !pathname.startsWith("/verify-email") && !pathname.startsWith("/reset-password")) {
     return NextResponse.redirect(new URL("/dashboard", request.url));
   }

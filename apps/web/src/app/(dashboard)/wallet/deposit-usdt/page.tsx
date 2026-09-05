@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
@@ -93,7 +93,7 @@ export default function DepositUsdtPage() {
             <Card>
               <CardHeader className="pb-3">
                 <CardTitle className="text-base">Auto USDT Payment</CardTitle>
-                <CardDescription>Powered by Cryptomus — Auto credit after confirmation</CardDescription>
+                <CardDescription>Powered by Cryptomus  --  Auto credit after confirmation</CardDescription>
               </CardHeader>
               <CardContent>
                 <form onSubmit={autoForm.handleSubmit(onAuto)} className="space-y-4">
@@ -135,8 +135,8 @@ export default function DepositUsdtPage() {
                   </div>
                 </div>
                 <div className="space-y-1 text-xs">
-                  <p className="text-orange-600 font-medium">⚠️ Send ONLY {invoice.currency} on {invoice.network}</p>
-                  <p className="text-muted-foreground">⚠️ Sending other coins = permanent loss</p>
+                  <p className="text-orange-600 font-medium">[WARN] Send ONLY {invoice.currency} on {invoice.network}</p>
+                  <p className="text-muted-foreground">[WARN] Sending other coins = permanent loss</p>
                   <p className="text-green-600">✓ Auto-credited after 1 network confirmation</p>
                 </div>
                 <Button variant="outline" className="w-full" onClick={() => setInvoice(null)}>Create New Invoice</Button>
@@ -198,7 +198,7 @@ export default function DepositUsdtPage() {
                     <Input placeholder="0x... or TxHash" {...manualForm.register("txHash")} />
                     {manualForm.formState.errors.txHash && <p className="text-xs text-destructive">{manualForm.formState.errors.txHash.message as string}</p>}
                   </div>
-                  <p className="text-xs text-muted-foreground">⚠️ Make sure you send on {network} network only</p>
+                  <p className="text-xs text-muted-foreground">[WARN] Make sure you send on {network} network only</p>
                   <Button type="submit" className="w-full" disabled={manualLoading}>{manualLoading ? "Submitting..." : "Submit Deposit Request"}</Button>
                 </form>
               </>

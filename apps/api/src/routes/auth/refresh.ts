@@ -21,16 +21,16 @@ export default async function refreshRoute(fastify: FastifyInstance) {
       const secondsSinceRevoke = (Date.now() - stored.revokedAt.getTime()) / 1000;
 
       if (secondsSinceRevoke <= 30) {
-        // Within grace window — almost certainly a multi-tab race, not an attack.
+        // Within grace window  --  almost certainly a multi-tab race, not an attack.
         // Return 401 so client retries with the new cookie from the winning request.
         fastify.log.debug({ userId: stored.userId, secondsSinceRevoke },
-          "Refresh token race (within grace window) — returning 401 for retry");
-        throw new UnauthorizedError("Token rotated by concurrent request — please retry");
+          "Refresh token race (within grace window)  --  returning 401 for retry");
+        throw new UnauthorizedError("Token rotated by concurrent request  --  please retry");
       }
 
-      // Outside grace window — token used long after rotation completed → security event
+      // Outside grace window  --  token used long after rotation completed -> security event
       fastify.log.warn({ userId: stored.userId, secondsSinceRevoke },
-        "Refresh token reuse detected outside grace window — revoking all sessions");
+        "Refresh token reuse detected outside grace window  --  revoking all sessions");
       await fastify.prisma.refreshToken.updateMany({
         where: { userId: stored.userId, revokedAt: null },
         data: { revokedAt: new Date() },
@@ -50,7 +50,7 @@ export default async function refreshRoute(fastify: FastifyInstance) {
       throw new UnauthorizedError("Account is suspended");
     }
 
-    // Issue 6 fix: atomic revoke — only the first concurrent request wins.
+    // Issue 6 fix: atomic revoke  --  only the first concurrent request wins.
     // If two tabs hit refresh simultaneously with the same token, one wins
     // and the other gets a clean 401 (not a full session nuke).
     // The losing request's browser will retry and get the new cookie from the winner.
@@ -61,10 +61,10 @@ export default async function refreshRoute(fastify: FastifyInstance) {
 
     if (revoked.count === 0) {
       // Another concurrent request already rotated this token.
-      // This is NOT a security event — it's a race between two honest requests.
+      // This is NOT a security event  --  it's a race between two honest requests.
       // Return 401 so the client retries; it will get new cookies from the winning request.
-      fastify.log.debug({ userId: stored.userId }, "Refresh rotation race — other request already rotated, returning 401");
-      throw new UnauthorizedError("Token already rotated — please retry");
+      fastify.log.debug({ userId: stored.userId }, "Refresh rotation race  --  other request already rotated, returning 401");
+      throw new UnauthorizedError("Token already rotated  --  please retry");
     }
 
     // Issue new token only after successfully revoking old one
@@ -97,7 +97,7 @@ export default async function refreshRoute(fastify: FastifyInstance) {
     });
 
     // Issue 8 fix: do NOT return accessToken in body
-    // Frontend uses HttpOnly cookie via withCredentials — body token is a security leak
+    // Frontend uses HttpOnly cookie via withCredentials  --  body token is a security leak
     return reply.send({ expiresIn: 900 });
   });
 }

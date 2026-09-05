@@ -51,7 +51,7 @@ export default function ApiKeyPage() {
             <div className="space-y-3">
               <div className="flex items-start gap-2 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
                 <AlertCircle className="h-4 w-4 text-yellow-600 shrink-0 mt-0.5" />
-                <p className="text-sm text-yellow-800">Save this key — it won&apos;t be shown again</p>
+                <p className="text-sm text-yellow-800">Save this key  --  it won&apos;t be shown again</p>
               </div>
               <div className="flex gap-2">
                 <Input value={rawKey} readOnly className="font-mono text-xs" />
@@ -86,10 +86,10 @@ export default function ApiKeyPage() {
 
           <div className="rounded-lg bg-muted p-3 text-xs space-y-1 text-muted-foreground">
             <p className="font-semibold text-foreground text-sm">Quick Reference</p>
-            <p>action=services — List all services</p>
-            <p>action=add — Place an order</p>
-            <p>action=status — Check order status</p>
-            <p>action=balance — Get wallet balance (USD)</p>
+            <p>action=services  --  List all services</p>
+            <p>action=add  --  Place an order</p>
+            <p>action=status  --  Check order status</p>
+            <p>action=balance  --  Get wallet balance (USD)</p>
             <p>Rate limit: 60 requests / minute</p>
           </div>
         </CardContent>

@@ -1,9 +1,9 @@
 // Access token is now an HttpOnly cookie set by the server.
-// It is NOT accessible from JS — the browser sends it automatically via withCredentials.
+// It is NOT accessible from JS  --  the browser sends it automatically via withCredentials.
 // These stubs are kept for backward compatibility but are no-ops for the cookie-based flow.
 
 export function getAccessToken(): string | undefined {
-  // HttpOnly cookie — not readable from JS. Returns undefined.
+  // HttpOnly cookie  --  not readable from JS. Returns undefined.
   return undefined;
 }
 

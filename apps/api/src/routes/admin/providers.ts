@@ -6,7 +6,7 @@ import { ProviderClient } from "../../services/provider.service.js";
 import { NotFoundError, ValidationError } from "../../lib/errors.js";
 
 export default async function adminProvidersRoute(fastify: FastifyInstance) {
-  // List providers — exclude soft-deleted
+  // List providers  --  exclude soft-deleted
   fastify.get("/providers", { preHandler: [fastify.authenticateAdmin] }, async (_request, reply) => {
     const providers = await fastify.prisma.provider.findMany({
       where: { deletedAt: null } as never,
@@ -67,7 +67,7 @@ export default async function adminProvidersRoute(fastify: FastifyInstance) {
       const currencySettings = await fastify.prisma.currencySettings.findUniqueOrThrow({
         where: { id: "singleton" },
       }) as any;
-      // Use serviceMarkupPercent for selling price — not depositMarkupPercent
+      // Use serviceMarkupPercent for selling price  --  not depositMarkupPercent
       const globalMarkup = new Decimal(
         currencySettings.serviceMarkupPercent?.toString() ??
         currencySettings.markupPercent?.toString() ?? "0"
@@ -92,16 +92,16 @@ export default async function adminProvidersRoute(fastify: FastifyInstance) {
         });
 
         if (existing) {
-          // Preserve per-service markupOverride — only apply global markup when no override is set
+          // Preserve per-service markupOverride  --  only apply global markup when no override is set
           let effectiveSellingPrice: Decimal;
           if (existing.markupOverride !== null) {
-            // Service has a custom markup override — recalculate using that, not the global one
+            // Service has a custom markup override  --  recalculate using that, not the global one
             const overrideMultiplier = new Decimal(1).plus(
               new Decimal(existing.markupOverride.toString()).dividedBy(100),
             );
             effectiveSellingPrice = costPriceUsd.times(overrideMultiplier).toDecimalPlaces(8);
           } else {
-            // No override — use global serviceMarkupPercent
+            // No override  --  use global serviceMarkupPercent
             effectiveSellingPrice = globalSellingPrice;
           }
 
@@ -115,7 +115,7 @@ export default async function adminProvidersRoute(fastify: FastifyInstance) {
               supportsRefill: ps.refill ?? false,
               // Fix #4: preserve existing supportsCancel if provider doesn't send the field
               supportsCancel: (ps as any).cancel !== undefined ? Boolean((ps as any).cancel) : existing.supportsCancel,
-              // markupOverride intentionally NOT touched — preserved as-is
+              // markupOverride intentionally NOT touched  --  preserved as-is
             },
           });
           updated++;
@@ -138,7 +138,7 @@ export default async function adminProvidersRoute(fastify: FastifyInstance) {
               minQuantity: Number(ps.min),
               maxQuantity: Number(ps.max),
               supportsRefill: ps.refill ?? false,
-              // Fix #4: default false for new services — safer than assuming cancel works
+              // Fix #4: default false for new services  --  safer than assuming cancel works
               supportsCancel: (ps as any).cancel !== undefined ? Boolean((ps as any).cancel) : false,
               isEnabled: true,
             },
@@ -167,7 +167,7 @@ export default async function adminProvidersRoute(fastify: FastifyInstance) {
     },
   );
 
-  // Soft-delete provider — disables it and all its services, sets deletedAt
+  // Soft-delete provider  --  disables it and all its services, sets deletedAt
   // Hard delete would fail when orders reference services from this provider
   fastify.delete(
     "/providers/:id",

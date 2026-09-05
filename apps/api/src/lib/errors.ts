@@ -53,7 +53,7 @@ export class ServiceUnavailableError extends AppError {
 
 /**
  * Thrown by refundOrderTx when the order has already been refunded.
- * Callers can safely catch this specific error and skip — all other errors should propagate.
+ * Callers can safely catch this specific error and skip  --  all other errors should propagate.
  */
 export class AlreadyRefundedError extends AppError {
   constructor(orderId?: string) {

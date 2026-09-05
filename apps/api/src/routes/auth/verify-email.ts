@@ -23,7 +23,7 @@ export default async function verifyEmailRoute(fastify: FastifyInstance) {
     if (record.expiresAt < new Date()) throw new ValidationError("Verification token has expired. Please request a new one.");
 
     // Fix #6: token consume + user verification in ONE transaction
-    // Previously: two separate DB calls — crash between them = token used but email unverified
+    // Previously: two separate DB calls  --  crash between them = token used but email unverified
     await fastify.prisma.$transaction(async (tx) => {
       const consumed = await tx.emailVerification.updateMany({
         where: { id: record.id, usedAt: null },

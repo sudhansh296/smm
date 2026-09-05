@@ -46,7 +46,7 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
     ref,
   ) => {
     // When asChild=true, Slot requires exactly ONE child element.
-    // Never render the spinner in asChild mode — it would break Slot.
+    // Never render the spinner in asChild mode  --  it would break Slot.
     if (asChild) {
       return (
         <Slot

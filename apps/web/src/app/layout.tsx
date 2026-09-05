@@ -6,7 +6,7 @@ import { Providers } from "./providers";
 const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "NexusSMM — SMM Panel India",
+  title: "NexusSMM  --  SMM Panel India",
   description:
     "Buy Telegram members, views, reactions and more. Pay in INR via UPI or USDT crypto.",
 };

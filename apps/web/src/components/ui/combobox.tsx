@@ -132,7 +132,7 @@ export function Combobox({
         <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
       </button>
 
-      {/* Dropdown — rendered via portal-like fixed positioning */}
+      {/* Dropdown  --  rendered via portal-like fixed positioning */}
       {open && (
         <div
           ref={dropdownRef}

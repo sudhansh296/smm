@@ -27,7 +27,7 @@ export default function WalletPage() {
     queryFn: () => api.get("/user/wallet").then((r) => r.data),
     refetchInterval: 15_000,       // every 15 sec auto refresh
     refetchOnWindowFocus: true,    // refresh when tab gets focus
-    staleTime: 0,                  // always consider stale — fetch fresh on mount
+    staleTime: 0,                  // always consider stale  --  fetch fresh on mount
   });
 
   const { data: txData, isLoading } = useQuery({
@@ -56,11 +56,11 @@ export default function WalletPage() {
             <span className="font-medium text-sm">Available Balance</span>
           </div>
           <p className="text-3xl sm:text-4xl font-bold">
-            {wallet ? formatUsd(wallet.balanceUsd) : "—"}
+            {wallet ? formatUsd(wallet.balanceUsd) : " -- "}
           </p>
           <p className="text-primary-foreground/70 mt-1 text-sm">
-            ≈ {wallet ? formatInr(wallet.balanceInr) : "—"} · Rate ₹
-            {wallet ? Number(wallet.effectiveInrRate).toFixed(2) : "—"}/$1
+            ≈ {wallet ? formatInr(wallet.balanceInr) : " -- "} · Rate Rs.
+            {wallet ? Number(wallet.effectiveInrRate).toFixed(2) : " -- "}/$1
           </p>
         </CardContent>
       </Card>

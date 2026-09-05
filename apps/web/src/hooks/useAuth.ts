@@ -23,7 +23,7 @@ export function useAuth() {
     },
     onSuccess: (data) => {
       if (data.requiresTotpCode) return; // handled by caller
-      // Access token is now HttpOnly cookie — no need to store it in JS
+      // Access token is now HttpOnly cookie  --  no need to store it in JS
       setAuth(data.user, ""); // store user profile only; token is in HttpOnly cookie
       toast.success("Logged in successfully");
       router.push("/dashboard");

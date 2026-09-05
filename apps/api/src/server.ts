@@ -6,7 +6,7 @@ async function start() {
 
   try {
     await app.listen({ port: env.PORT, host: "0.0.0.0" });
-    app.log.info(`🚀 NexusSMM API running on port ${env.PORT}`);
+    app.log.info(`[API] NexusSMM API running on port ${env.PORT}`);
   } catch (err) {
     app.log.error(err);
     process.exit(1);

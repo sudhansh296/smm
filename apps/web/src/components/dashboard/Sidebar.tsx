@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { useState } from "react";
 import Link from "next/link";
@@ -149,7 +149,7 @@ export function Sidebar() {
         <div className="px-5 py-3 border-b bg-muted/30">
           <p className="text-xs text-muted-foreground">Wallet Balance</p>
           <p className="font-semibold text-primary text-base">${balanceUsd}</p>
-          <p className="text-xs text-muted-foreground">â‰ˆ â‚¹{balanceInr}</p>
+          <p className="text-xs text-muted-foreground">~ Rs.{balanceInr}</p>
         </div>
       )}
 
@@ -176,7 +176,7 @@ export function Sidebar() {
 
   return (
     <>
-      {/* â”€â”€ MOBILE top bar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
+      {/* -- MOBILE top bar ------------------------------------ */}
       <div className="lg:hidden fixed top-0 left-0 right-0 z-40 flex items-center justify-between px-4 h-14 border-b bg-card">
         <Link href="/dashboard" className="flex items-center gap-2">
           <div className="w-7 h-7 bg-primary rounded-lg flex items-center justify-center">
@@ -196,7 +196,7 @@ export function Sidebar() {
         </div>
       </div>
 
-      {/* â”€â”€ MOBILE drawer overlay â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
+      {/* -- MOBILE drawer overlay ------------------------------ */}
       {mobileOpen && (
         <div
           className="lg:hidden fixed inset-0 z-50 flex"
@@ -214,7 +214,7 @@ export function Sidebar() {
         </div>
       )}
 
-      {/* â”€â”€ DESKTOP fixed sidebar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
+      {/* -- DESKTOP fixed sidebar ------------------------------ */}
       <aside className="hidden lg:flex lg:fixed lg:left-0 lg:top-0 lg:h-full lg:w-64 lg:flex-col border-r bg-card z-40">
         <SidebarContent />
       </aside>

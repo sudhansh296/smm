@@ -2,7 +2,7 @@ import { Decimal } from "decimal.js";
 import type { PrismaClient, TransactionType } from "@nexussmm/db";
 import { InsufficientBalanceError, AlreadyRefundedError } from "../lib/errors.js";
 
-// ── Types ─────────────────────────────────────────────────────────────────────
+// -- Types ---------------------------------------------------------------------
 
 type TxClient = Omit<PrismaClient, "$connect" | "$disconnect" | "$on" | "$transaction" | "$use" | "$extends">;
 
@@ -22,7 +22,7 @@ interface RefundOrderOptions {
   description: string;
 }
 
-// ── Internal helpers (accept existing tx client — no nested transactions) ─────
+// -- Internal helpers (accept existing tx client  --  no nested transactions) -----
 
 /**
  * Credits wallet inside an EXISTING transaction.
@@ -109,7 +109,7 @@ export async function deductWalletTx(
 
 /**
  * Unified refund function inside an EXISTING transaction.
- * Checks orders.refundedAt — if already set, throws "already refunded".
+ * Checks orders.refundedAt  --  if already set, throws "already refunded".
  * Sets refundedAt + refundedAmountUsd on the order, then credits wallet.
  * Uses a single idempotency key: "refund:<orderId>"
  */
@@ -147,11 +147,11 @@ export async function refundOrderTx(
   });
 }
 
-// ── Public API (starts its own transaction) ───────────────────────────────────
+// -- Public API (starts its own transaction) -----------------------------------
 
 /**
  * Atomically credits user wallet. Used for deposits and standalone refunds.
- * Starts its own transaction — do NOT call from inside another transaction.
+ * Starts its own transaction  --  do NOT call from inside another transaction.
  */
 export async function creditWallet(
   prisma: PrismaClient,
@@ -166,7 +166,7 @@ export async function creditWallet(
 
 /**
  * Atomically deducts order cost from user wallet.
- * Starts its own transaction — do NOT call from inside another transaction.
+ * Starts its own transaction  --  do NOT call from inside another transaction.
  */
 export async function deductForOrder(
   prisma: PrismaClient,
@@ -182,7 +182,7 @@ export async function deductForOrder(
 
 /**
  * Admin balance adjustment (positive or negative).
- * Starts its own transaction — do NOT call from inside another transaction.
+ * Starts its own transaction  --  do NOT call from inside another transaction.
  */
 export async function adminAdjustWallet(
   prisma: PrismaClient,

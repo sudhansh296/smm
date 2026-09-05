@@ -14,7 +14,7 @@ export default async function manualInrDepositRoute(fastify: FastifyInstance) {
 
     const amountInr = parsed.amountInr;
     const note      = parsed.note;
-    // Fix: normalize — let as new const to avoid const reassignment error
+    // Fix: normalize  --  let as new const to avoid const reassignment error
     const utrNumber = parsed.utrNumber.trim().toUpperCase();
 
     const existing = await fastify.prisma.depositRequest.findFirst({

@@ -8,7 +8,7 @@ export const api = axios.create({
   headers: { "Content-Type": "application/json" },
 });
 
-// No request interceptor needed — HttpOnly cookie sent automatically via withCredentials
+// No request interceptor needed  --  HttpOnly cookie sent automatically via withCredentials
 
 let isRefreshing = false;
 // Issue 7 fix: queue stores both resolve and reject so hanging requests are
@@ -43,11 +43,11 @@ api.interceptors.response.use(
       isRefreshing = true;
 
       try {
-        // Refresh — backend sets new HttpOnly cookies automatically
+        // Refresh  --  backend sets new HttpOnly cookies automatically
         await axios.post(`${BASE_URL}/auth/refresh`, {}, { withCredentials: true });
         // Issue 7 fix: resolve all queued requests now that we have new cookies
         flushQueue(null);
-        return api(original); // retry original request — new cookie already set
+        return api(original); // retry original request  --  new cookie already set
       } catch (refreshError) {
         // Issue 7 fix: reject all queued requests so they don't hang forever
         flushQueue(refreshError);

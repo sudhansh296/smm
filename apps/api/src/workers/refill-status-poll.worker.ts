@@ -22,7 +22,7 @@ export function createRefillStatusPollWorker(redis: Redis, prisma: PrismaClient)
   const worker = new Worker(
     "refill-status-poll",
     async (_job: Job) => {
-      // Fix 1: query BOTH "pending" and "processing" — provider may return "Pending"
+      // Fix 1: query BOTH "pending" and "processing"  --  provider may return "Pending"
       // which we map back to "pending", so that order must remain pollable
       const activeOrders = await prisma.order.findMany({
         where: {
@@ -59,16 +59,16 @@ export function createRefillStatusPollWorker(redis: Redis, prisma: PrismaClient)
           const mapped = REFILL_STATUS_MAP[providerStatus] ?? null;
 
           if (!mapped) {
-            // Unknown status — keep polling, do not change
-            console.warn(`[refill-status-poll] Order ${order.id}: unknown status "${providerStatus}" — will retry`);
+            // Unknown status  --  keep polling, do not change
+            console.warn(`[refill-status-poll] Order ${order.id}: unknown status "${providerStatus}"  --  will retry`);
             continue;
           }
 
-          // Fix 1: only write if status actually changed — prevents noisy updates
+          // Fix 1: only write if status actually changed  --  prevents noisy updates
           if (mapped === order.refillStatus) continue;
 
           await prisma.order.update({ where: { id: order.id }, data: { refillStatus: mapped } });
-          console.log(`[refill-status-poll] Order ${order.id}: ${order.refillStatus} → ${mapped}`);
+          console.log(`[refill-status-poll] Order ${order.id}: ${order.refillStatus} -> ${mapped}`);
 
           if (mapped === "completed") {
             await (prisma as any).notification.create({
@@ -79,7 +79,7 @@ export function createRefillStatusPollWorker(redis: Redis, prisma: PrismaClient)
               data: { userId: order.userId, message: `Refill for order #${order.id.slice(-8)} failed. You can request a new refill.` },
             });
           }
-          // "pending" or "processing" — no notification needed, keep polling
+          // "pending" or "processing"  --  no notification needed, keep polling
         } catch (err) {
           console.error(`[refill-status-poll] Error polling order ${order.id}:`, err);
         }

@@ -18,18 +18,18 @@ export function createOrderCancelWorker(redis: Redis, prisma: PrismaClient) {
       }) as any;
 
       if (!order) {
-        console.warn(`[order-cancel] Order ${orderId} not found — skipping`);
+        console.warn(`[order-cancel] Order ${orderId} not found  --  skipping`);
         return;
       }
 
       // Only retry if still CANCEL_REQUESTED
       if (order.status !== "CANCEL_REQUESTED") {
-        console.log(`[order-cancel] Order ${orderId} is now ${order.status} — no retry needed`);
+        console.log(`[order-cancel] Order ${orderId} is now ${order.status}  --  no retry needed`);
         return;
       }
 
       if (!order.providerOrderId) {
-        // No providerOrderId — safe to finalize locally
+        // No providerOrderId  --  safe to finalize locally
         await prisma.$transaction(async (tx) => {
           const locked = await tx.$queryRaw<Array<{ status: string }>>`SELECT status FROM orders WHERE id = ${orderId} FOR UPDATE`;
           if (!locked[0] || locked[0].status !== "CANCEL_REQUESTED") return;
@@ -57,7 +57,7 @@ export function createOrderCancelWorker(redis: Redis, prisma: PrismaClient) {
       const result = await client.cancelOrder(order.providerOrderId);
 
       if ("cancel" in result && result.cancel === 1) {
-        // Provider confirmed — get fresh remains and finalize
+        // Provider confirmed  --  get fresh remains and finalize
         let freshRemains: number | undefined;
         try {
           const freshStatus = await client.getStatus(order.providerOrderId);
@@ -67,7 +67,7 @@ export function createOrderCancelWorker(redis: Redis, prisma: PrismaClient) {
               freshRemains = parsed;
             }
           }
-        } catch { /* use undefined — full refund */ }
+        } catch { /* use undefined  --  full refund */ }
 
         const refundAmount = freshRemains !== undefined && freshRemains < order.quantity
           ? new Decimal(order.costUsd.toString()).times(new Decimal(freshRemains).dividedBy(order.quantity)).toDecimalPlaces(8)
@@ -93,7 +93,7 @@ export function createOrderCancelWorker(redis: Redis, prisma: PrismaClient) {
         });
         console.log(`[order-cancel] Order ${orderId}: cancel retry succeeded`);
       } else if ("error" in result) {
-        // Provider still rejecting — throw so BullMQ retries with backoff
+        // Provider still rejecting  --  throw so BullMQ retries with backoff
         throw new Error(`Provider cancel rejected: ${result.error}`);
       }
     },

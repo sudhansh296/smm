@@ -24,12 +24,12 @@ const envSchema = z.object({
   // TOTP encryption
   TOTP_ENCRYPTION_KEY: z.string().length(64).regex(/^[0-9a-fA-F]{64}$/, "Must be 64 hex characters (32 bytes)"), // 32-byte hex
 
-  // Google OAuth (optional — feature not yet implemented)
+  // Google OAuth (optional  --  feature not yet implemented)
   GOOGLE_CLIENT_ID: z.string().min(1).optional(),
   GOOGLE_CLIENT_SECRET: z.string().min(1).optional(),
   GOOGLE_CALLBACK_URL: z.string().url().optional(),
 
-  // Email (SMTP) — optional in dev (Ethereal fallback), required in production
+  // Email (SMTP)  --  optional in dev (Ethereal fallback), required in production
   SMTP_HOST: z.string().optional().default(""),
   SMTP_PORT: z.coerce.number().default(587),
   SMTP_USER: z.string().optional().default(""),
@@ -67,7 +67,7 @@ export type Env = z.infer<typeof envSchema>;
 function validateEnv(): Env {
   const result = envSchema.safeParse(process.env);
   if (!result.success) {
-    console.error("âŒ Invalid environment variables:");
+    console.error("[FAIL] Invalid environment variables:");
     for (const [key, issues] of Object.entries(result.error.flatten().fieldErrors)) {
       console.error(`  ${key}: ${issues?.join(", ")}`);
     }

@@ -45,21 +45,21 @@ export default async function passwordResetRoute(fastify: FastifyInstance) {
 
     const passwordHash = await hashPassword(password);
 
-    // Fix #12: atomic consumption — consume token INSIDE transaction before password update
+    // Fix #12: atomic consumption  --  consume token INSIDE transaction before password update
     // Prevents two concurrent requests both succeeding if they both read before either commits
     await fastify.prisma.$transaction(async (tx) => {
-      // Consume token atomically — fails if already used by a concurrent request
+      // Consume token atomically  --  fails if already used by a concurrent request
       const consumed = await tx.passwordReset.updateMany({
         where: { id: record.id, usedAt: null },
         data: { usedAt: new Date() },
       });
       if (consumed.count === 0) {
-        throw new ValidationError("Reset token already used — possible concurrent request");
+        throw new ValidationError("Reset token already used  --  possible concurrent request");
       }
 
       await tx.user.update({ where: { id: record.userId }, data: { passwordHash } });
 
-      // Revoke all refresh tokens — all sessions invalidated on password change
+      // Revoke all refresh tokens  --  all sessions invalidated on password change
       await tx.refreshToken.updateMany({
         where: { userId: record.userId, revokedAt: null },
         data: { revokedAt: new Date() },

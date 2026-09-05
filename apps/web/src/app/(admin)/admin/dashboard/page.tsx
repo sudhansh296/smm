@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
@@ -32,14 +32,14 @@ export default function AdminDashboardPage() {
   });
 
   const statCards = [
-    { label: "Total Users",    value: users?.total ?? "—",                                   icon: Users,        color: "text-blue-600",   bg: "bg-blue-50" },
-    { label: "Total Orders",   value: orders?.total ?? "—",                                  icon: ShoppingCart, color: "text-purple-600", bg: "bg-purple-50" },
-    { label: "Total Revenue",  value: stats ? formatUsd(stats.summary.totalRevenue) : "—",   icon: DollarSign,   color: "text-green-600",  bg: "bg-green-50" },
-    { label: "Pending Orders", value: stats?.summary.pendingOrders ?? "—",                   icon: Clock,        color: "text-yellow-600", bg: "bg-yellow-50" },
-    { label: "Total Deposits", value: stats ? formatUsd(stats.summary.totalDeposits) : "—",  icon: TrendingUp,   color: "text-indigo-600", bg: "bg-indigo-50" },
-    { label: "Total Refunds",  value: stats ? formatUsd(stats.summary.totalRefunds) : "—",   icon: RefreshCcw,   color: "text-red-500",    bg: "bg-red-50" },
-    { label: "Providers",      value: providers?.length ?? "—",                              icon: Server,       color: "text-orange-600", bg: "bg-orange-50" },
-    { label: "INR Rate",       value: currency ? `Rs.${Number(currency.effectiveRate).toFixed(2)}` : "—", icon: DollarSign, color: "text-teal-600", bg: "bg-teal-50" },
+    { label: "Total Users",    value: users?.total ?? " -- ",                                   icon: Users,        color: "text-blue-600",   bg: "bg-blue-50" },
+    { label: "Total Orders",   value: orders?.total ?? " -- ",                                  icon: ShoppingCart, color: "text-purple-600", bg: "bg-purple-50" },
+    { label: "Total Revenue",  value: stats ? formatUsd(stats.summary.totalRevenue) : " -- ",   icon: DollarSign,   color: "text-green-600",  bg: "bg-green-50" },
+    { label: "Pending Orders", value: stats?.summary.pendingOrders ?? " -- ",                   icon: Clock,        color: "text-yellow-600", bg: "bg-yellow-50" },
+    { label: "Total Deposits", value: stats ? formatUsd(stats.summary.totalDeposits) : " -- ",  icon: TrendingUp,   color: "text-indigo-600", bg: "bg-indigo-50" },
+    { label: "Total Refunds",  value: stats ? formatUsd(stats.summary.totalRefunds) : " -- ",   icon: RefreshCcw,   color: "text-red-500",    bg: "bg-red-50" },
+    { label: "Providers",      value: providers?.length ?? " -- ",                              icon: Server,       color: "text-orange-600", bg: "bg-orange-50" },
+    { label: "INR Rate",       value: currency ? `Rs.${Number(currency.effectiveRate).toFixed(2)}` : " -- ", icon: DollarSign, color: "text-teal-600", bg: "bg-teal-50" },
   ];
 
   return (
@@ -47,7 +47,7 @@ export default function AdminDashboardPage() {
       <div>
         <h1 className="text-2xl sm:text-3xl font-bold">Admin Dashboard</h1>
         <p className="text-muted-foreground mt-1 text-sm">
-          INR Rate: Rs.{currency?.effectiveRate ?? "—"}/$1 · Last 7 days analytics
+          INR Rate: Rs.{currency?.effectiveRate ?? " -- "}/$1 · Last 7 days analytics
         </p>
       </div>
 
@@ -78,7 +78,7 @@ export default function AdminDashboardPage() {
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             <Card>
               <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-semibold">Revenue — Last 7 Days ($)</CardTitle>
+                <CardTitle className="text-sm font-semibold">Revenue  --  Last 7 Days ($)</CardTitle>
               </CardHeader>
               <CardContent>
                 <ResponsiveContainer width="100%" height={220}>
@@ -95,7 +95,7 @@ export default function AdminDashboardPage() {
 
             <Card>
               <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-semibold">Orders — Last 7 Days</CardTitle>
+                <CardTitle className="text-sm font-semibold">Orders  --  Last 7 Days</CardTitle>
               </CardHeader>
               <CardContent>
                 <ResponsiveContainer width="100%" height={220}>

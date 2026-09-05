@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -94,14 +94,14 @@ export default function AdminServicesPage() {
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
                     <p className="font-medium text-sm leading-tight">{s.name}</p>
-                    <p className="text-xs text-muted-foreground">{s.categoryName} Â· {s.providerName}</p>
+                    <p className="text-xs text-muted-foreground">{s.categoryName}  -  {s.providerName}</p>
                   </div>
                   <Badge variant={s.isEnabled ? "success" : "secondary"} className="text-xs shrink-0">{s.isEnabled ? "Active" : "Off"}</Badge>
                 </div>
                 <div className="flex gap-3 text-xs text-muted-foreground">
                   <span>Cost: {formatUsd((Number(s.costPriceUsd) * 1000).toFixed(2))}/1k</span>
                   <span className="font-semibold text-primary">Sell: {formatUsd((Number(s.sellingPriceUsd) * 1000).toFixed(2))}/1k</span>
-                  {s.backupProviderId && <span className="text-blue-600 font-medium">âš¡ Backup</span>}
+                  {s.backupProviderId && <span className="text-blue-600 font-medium"> Backup</span>}
                 </div>
                 <div className="flex gap-2">
                   <Button size="sm" variant="outline" className="flex-1 text-xs h-8" onClick={() => setEditService(s)}>
@@ -151,7 +151,7 @@ export default function AdminServicesPage() {
                       <div className="flex flex-col items-center gap-1">
                         <Badge variant={s.isEnabled ? "success" : "secondary"}>{s.isEnabled ? "Active" : "Disabled"}</Badge>
                         {s.backupProviderId && (
-                          <span className="text-xs text-blue-600 font-medium">âš¡ Backup set</span>
+                          <span className="text-xs text-blue-600 font-medium"> Backup set</span>
                         )}
                       </div>
                     </td>
@@ -200,7 +200,7 @@ export default function AdminServicesPage() {
                 </div>
               ))}
 
-              {/* Sell Price â€” manual override OR markup */}
+              {/* Sell Price  --  manual override OR markup */}
               <div className="space-y-1 rounded-lg border border-primary/30 p-3 bg-primary/5">
                 <label className="text-xs font-semibold text-primary">Sell Price (per 1000 units)</label>
                 <div className="flex gap-2 items-center">
@@ -223,7 +223,7 @@ export default function AdminServicesPage() {
                 <label className="text-xs font-medium">Markup Override % (global markup override)</label>
                 <Input
                   type="number" step="0.1"
-                  placeholder="e.g. 50 for 50% â€” leave blank for global"
+                  placeholder="e.g. 50 for 50%  --  leave blank for global"
                   value={editService.markupOverride ?? ""}
                   onChange={(e) => setEditService({ ...editService, markupOverride: e.target.value || null })}
                   className="h-8 text-sm"
@@ -250,7 +250,7 @@ export default function AdminServicesPage() {
                 </select>
                 {editService.backupProviderId && (
                   <p className="text-xs text-muted-foreground">
-                    If primary fails â†’ auto-retry on backup provider
+                    If primary fails -> auto-retry on backup provider
                   </p>
                 )}
               </div>

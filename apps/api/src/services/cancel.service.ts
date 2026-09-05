@@ -18,7 +18,7 @@ async function loadFulfillmentProvider(prisma: PrismaClient, order: any) {
   return alt ?? order.service.provider;
 }
 
-// Fix #3: clear semantics — remains=0 means fully delivered, no refund
+// Fix #3: clear semantics  --  remains=0 means fully delivered, no refund
 function calcCancelRefund(costUsd: string, quantity: number, remains: number | undefined): Decimal {
   const total = new Decimal(costUsd);
   if (remains === undefined || remains >= quantity) return total;        // unknown or nothing delivered
@@ -26,7 +26,7 @@ function calcCancelRefund(costUsd: string, quantity: number, remains: number | u
   return total.times(new Decimal(remains).dividedBy(quantity)).toDecimalPlaces(8);
 }
 
-// Enqueue a cancel retry job — called when provider cancel fails on first attempt
+// Enqueue a cancel retry job  --  called when provider cancel fails on first attempt
 export async function enqueueOrderCancelRetry(
   queues: { orderCancel: { add: Function } },
   orderId: string,
@@ -36,7 +36,7 @@ export async function enqueueOrderCancelRetry(
       "retry-cancel",
       { orderId },
       {
-        jobId: `cancel:${orderId}`,  // deterministic — one retry job per order
+        jobId: `cancel:${orderId}`,  // deterministic  --  one retry job per order
         removeOnComplete: true,
         removeOnFail: false,
       },
@@ -69,7 +69,7 @@ export async function cancelOrder(
     return { status: "CANCEL_REQUESTED", refunded: false, message: "Cancellation already in progress" };
   }
 
-  // FORWARDING — provider call in flight, do not refund immediately
+  // FORWARDING  --  provider call in flight, do not refund immediately
   if (order.status === "FORWARDING") {
     const marked = await prisma.order.updateMany({
       where: { id: orderId, status: "FORWARDING" } as never,
@@ -77,13 +77,13 @@ export async function cancelOrder(
     });
     if (marked.count === 0) {
       const fresh = await prisma.order.findUnique({ where: { id: orderId }, select: { status: true } }) as any;
-      throw new ValidationError(`Order status changed to ${fresh?.status ?? "unknown"} — please retry`);
+      throw new ValidationError(`Order status changed to ${fresh?.status ?? "unknown"}  --  please retry`);
     }
     if (order.providerOrderId) {
       const fwdProvider = await loadFulfillmentProvider(prisma, order);
       const cancelResult = await attemptProviderCancel(fwdProvider, order.providerOrderId);
       if (cancelResult === "cancelled") {
-        // Fix 9: need confirmed remains before refunding — same as PROCESSING path
+        // Fix 9: need confirmed remains before refunding  --  same as PROCESSING path
         let fwdRemains: number | undefined;
         let fwdFetchOk = false;
         try {
@@ -98,7 +98,7 @@ export async function cancelOrder(
               parsed <= order.quantity
             ) { fwdRemains = parsed; fwdFetchOk = true; }
           }
-        } catch { /* network error — stay CANCEL_REQUESTED */ }
+        } catch { /* network error  --  stay CANCEL_REQUESTED */ }
         if (!fwdFetchOk) {
           return { status: "CANCEL_REQUESTED", refunded: false, message: "Cancellation accepted. Refund calculated once delivery status confirmed." };
         }
@@ -109,13 +109,13 @@ export async function cancelOrder(
     return { status: "CANCEL_REQUESTED", refunded: false, message: "Cancellation requested. Refund will be issued once provider confirms." };
   }
 
-  // PENDING with no providerOrderId — nothing sent to provider
+  // PENDING with no providerOrderId  --  nothing sent to provider
   if (order.status === "PENDING" && !order.providerOrderId) {
     // Fix 7: transaction returns boolean so we know if cancel actually happened
     // Race: worker may have changed status to FORWARDING between our read and the lock
     const didCancel = await prisma.$transaction(async (tx) => {
       const locked = await tx.$queryRaw<Array<{ status: string }>>`SELECT status FROM orders WHERE id = ${orderId} FOR UPDATE`;
-      if (!locked[0] || locked[0].status !== "PENDING") return false; // status changed — don't cancel
+      if (!locked[0] || locked[0].status !== "PENDING") return false; // status changed  --  don't cancel
       await tx.order.update({ where: { id: orderId }, data: { status: "CANCELLED" } });
       await refundOrderTx(tx as Parameters<typeof refundOrderTx>[0], orderId, {
         userId: order.userId,
@@ -131,24 +131,24 @@ export async function cancelOrder(
       return { status: "CANCELLED", refunded: true, message: "Order cancelled and refunded" };
     }
 
-    // Status changed between read and lock (e.g. FORWARDING) — re-read and handle
+    // Status changed between read and lock (e.g. FORWARDING)  --  re-read and handle
     const fresh = await prisma.order.findUnique({ where: { id: orderId }, select: { status: true, providerOrderId: true } }) as any;
     if (!fresh) throw new NotFoundError("Order not found");
-    // Recursive call with fresh state — one level deep only (status is now FORWARDING/PROCESSING)
+    // Recursive call with fresh state  --  one level deep only (status is now FORWARDING/PROCESSING)
     if (["FORWARDING", "PROCESSING", "IN_PROGRESS"].includes(fresh.status)) {
       return cancelOrder(prisma, orderId, requestingUserId, isAdmin);
     }
-    return { status: "CANCEL_REQUESTED", refunded: false, message: `Order in ${fresh.status} — cancellation requested` };
+    return { status: "CANCEL_REQUESTED", refunded: false, message: `Order in ${fresh.status}  --  cancellation requested` };
   }
 
-  // PROCESSING/IN_PROGRESS without providerOrderId — unusual state, safe to cancel
+  // PROCESSING/IN_PROGRESS without providerOrderId  --  unusual state, safe to cancel
   if (!order.providerOrderId) {
-    // Fix 4: row lock + re-read before acting — another worker may have set providerOrderId
+    // Fix 4: row lock + re-read before acting  --  another worker may have set providerOrderId
     const didCancel = await prisma.$transaction(async (tx) => {
       const locked = await tx.$queryRaw<Array<{ status: string; providerOrderId: string | null }>>`
         SELECT status, "providerOrderId" FROM orders WHERE id = ${orderId} FOR UPDATE
       `;
-      // If providerOrderId appeared or status changed, abort — let caller handle
+      // If providerOrderId appeared or status changed, abort  --  let caller handle
       if (!locked[0] || locked[0].providerOrderId || !["PROCESSING","IN_PROGRESS"].includes(locked[0].status)) {
         return false;
       }
@@ -163,7 +163,7 @@ export async function cancelOrder(
       return true;
     });
     if (didCancel) return { status: "CANCELLED", refunded: true, message: "Order cancelled and refunded" };
-    // providerOrderId appeared or status changed — fall through to normal cancel flow
+    // providerOrderId appeared or status changed  --  fall through to normal cancel flow
     return cancelOrder(prisma, orderId, requestingUserId, isAdmin);
   }
 
@@ -179,7 +179,7 @@ export async function cancelOrder(
   });
   if (marked.count === 0) {
     const fresh = await prisma.order.findUnique({ where: { id: orderId }, select: { status: true } }) as any;
-    throw new ValidationError(`Order status changed to ${fresh?.status ?? "unknown"} — please retry`);
+    throw new ValidationError(`Order status changed to ${fresh?.status ?? "unknown"}  --  please retry`);
   }
 
   // Fix #2: use actual fulfillment provider for cancel
@@ -196,13 +196,13 @@ export async function cancelOrder(
     try {
       const client = new ProviderClient(provider);
       const freshStatus = await client.getStatus(order.providerOrderId);
-      // Fix: treat {error:...} response as unknown — do NOT use as confirmed data
+      // Fix: treat {error:...} response as unknown  --  do NOT use as confirmed data
       if ("error" in freshStatus || freshStatus.status === undefined) {
         console.warn(`[cancel-service] Fresh status returned error/invalid for ${orderId}:`, freshStatus);
-        // statusFetchSuccess stays false — will stay CANCEL_REQUESTED
+        // statusFetchSuccess stays false  --  will stay CANCEL_REQUESTED
       } else if (freshStatus.remains === undefined || freshStatus.remains === null) {
-        // Fix 8: status OK but remains missing — still unknown, do not finalize refund
-        console.warn(`[cancel-service] Fresh status has no remains for ${orderId} — staying CANCEL_REQUESTED`);
+        // Fix 8: status OK but remains missing  --  still unknown, do not finalize refund
+        console.warn(`[cancel-service] Fresh status has no remains for ${orderId}  --  staying CANCEL_REQUESTED`);
       } else {
         const parsed = Number(freshStatus.remains);
         if (
@@ -211,7 +211,7 @@ export async function cancelOrder(
           parsed < 0 ||
           parsed > order.quantity
         ) {
-          console.warn(`[cancel-service] Fresh status invalid remains (${parsed}) for ${orderId} — staying CANCEL_REQUESTED`);
+          console.warn(`[cancel-service] Fresh status invalid remains (${parsed}) for ${orderId}  --  staying CANCEL_REQUESTED`);
         } else {
           freshRemains = parsed;
           statusFetchSuccess = true;
@@ -222,9 +222,9 @@ export async function cancelOrder(
     }
 
     if (!statusFetchSuccess) {
-      // Cannot determine how much was delivered — stay CANCEL_REQUESTED
+      // Cannot determine how much was delivered  --  stay CANCEL_REQUESTED
       // Status-poll will finalize with confirmed data when network recovers
-      console.warn(`[cancel-service] Order ${orderId}: cancel confirmed but status unknown — staying CANCEL_REQUESTED for safe poll`);
+      console.warn(`[cancel-service] Order ${orderId}: cancel confirmed but status unknown  --  staying CANCEL_REQUESTED for safe poll`);
       return {
         status: "CANCEL_REQUESTED",
         refunded: false,
@@ -272,12 +272,12 @@ async function finaliseCancel(
     // Fix 2: block if order reached any terminal or financial state mid-race
     const safeToCancel = ["PENDING","FORWARDING","PROCESSING","IN_PROGRESS","CANCEL_REQUESTED"];
     if (!current[0] || !safeToCancel.includes(current[0].status)) {
-      // Order moved to COMPLETED/PARTIAL/REFUNDED/CANCELLED — do not overwrite
+      // Order moved to COMPLETED/PARTIAL/REFUNDED/CANCELLED  --  do not overwrite
       return;
     }
     await tx.order.update({ where: { id: orderId }, data: { status: "CANCELLED" } });
     if (refundAmount.greaterThan(0)) {
-      // Fix #1: only catch AlreadyRefundedError — real errors propagate and rollback transaction
+      // Fix #1: only catch AlreadyRefundedError  --  real errors propagate and rollback transaction
       try {
         await refundOrderTx(tx as Parameters<typeof refundOrderTx>[0], orderId, {
           userId: order.userId,
@@ -287,9 +287,9 @@ async function finaliseCancel(
         });
       } catch (err) {
         if (err instanceof AlreadyRefundedError) {
-          console.log(`[cancel-service] Order ${orderId} already refunded — skipping`);
+          console.log(`[cancel-service] Order ${orderId} already refunded  --  skipping`);
         } else {
-          throw err; // DB error, Prisma error, etc. — rollback
+          throw err; // DB error, Prisma error, etc.  --  rollback
         }
       }
     }

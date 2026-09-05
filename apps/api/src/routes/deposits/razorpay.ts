@@ -11,9 +11,9 @@ export default async function razorpayDepositRoute(fastify: FastifyInstance) {
     const isProduction = process.env["NODE_ENV"] === "production";
     const isMock = !isProduction && (!env.RAZORPAY_KEY_ID || env.RAZORPAY_KEY_ID === "mock" || env.RAZORPAY_KEY_ID.startsWith("rzp_test_xxx"));
 
-    // Block mock mode in production — payment security requirement
+    // Block mock mode in production  --  payment security requirement
     if (isProduction && (!env.RAZORPAY_KEY_ID || env.RAZORPAY_KEY_ID === "mock" || env.RAZORPAY_KEY_ID.startsWith("rzp_test_xxx"))) {
-      fastify.log.error("Razorpay mock credentials detected in production — refusing to serve payment endpoints");
+      fastify.log.error("Razorpay mock credentials detected in production  --  refusing to serve payment endpoints");
       throw new Error("Payment gateway not configured for production");
     }
   // Only import Razorpay SDK when real keys are present
@@ -26,7 +26,7 @@ export default async function razorpayDepositRoute(fastify: FastifyInstance) {
   // Create Razorpay order
   fastify.post("/razorpay", { preHandler: [fastify.authenticate] }, async (request, reply) => {
     const { amountInr } = z.object({
-      amountInr: z.coerce.number().min(50, "Minimum ₹50").max(100000),
+      amountInr: z.coerce.number().min(50, "Minimum Rs.50").max(100000),
     }).parse(request.body);
 
     const effectiveRate = await getEffectiveInrRate(fastify.redis, fastify.prisma);
@@ -91,13 +91,13 @@ export default async function razorpayDepositRoute(fastify: FastifyInstance) {
     // Bug 6 fix: use inrRateSnapshot (rate at time of deposit creation), not current rate
     if (!(deposit as any).inrRateSnapshot) {
       fastify.log.error({ depositId: deposit.id }, "Missing inrRateSnapshot on deposit");
-      return reply.status(500).send({ error: "Cannot process payment — rate snapshot missing" });
+      return reply.status(500).send({ error: "Cannot process payment  --  rate snapshot missing" });
     }
     const snapshotRate = new Decimal((deposit as any).inrRateSnapshot.toString());
     const amountUsd = new Decimal((deposit as any).amountInr).dividedBy(snapshotRate).toDecimalPlaces(8);
 
     await fastify.prisma.$transaction(async (tx) => {
-      // Fix 8: lock the deposit row first — prevents concurrent verify requests double-crediting
+      // Fix 8: lock the deposit row first  --  prevents concurrent verify requests double-crediting
       const locked = await tx.$queryRaw<Array<{ status: string }>>`
         SELECT status FROM deposit_requests WHERE id = ${deposit.id} FOR UPDATE
       `;
@@ -117,13 +117,13 @@ export default async function razorpayDepositRoute(fastify: FastifyInstance) {
           amountUsd: amountUsd.toDecimalPlaces(8).toNumber(),
           amountInr: new Decimal((deposit as any).amountInr).toDecimalPlaces(4).toNumber(),
           inrRate: snapshotRate.toDecimalPlaces(4).toNumber(),
-          description: `Razorpay deposit ₹${(deposit as any).amountInr}`,
+          description: `Razorpay deposit Rs.${(deposit as any).amountInr}`,
           balanceBefore: balance.toDecimalPlaces(8).toNumber(),
           balanceAfter: newBalance.toDecimalPlaces(8).toNumber(),
           paymentGatewayId: razorpay_payment_id,
         },
       });
-      await tx.notification.create({ data: { userId: deposit.userId, message: `₹${(deposit as any).amountInr} deposited via Razorpay. $${amountUsd.toFixed(2)} added to your wallet.` } });
+      await tx.notification.create({ data: { userId: deposit.userId, message: `Rs.${(deposit as any).amountInr} deposited via Razorpay. $${amountUsd.toFixed(2)} added to your wallet.` } });
     });
 
     return reply.send({ message: "Payment verified. Wallet credited.", amountUsd: amountUsd.toFixed(2) });

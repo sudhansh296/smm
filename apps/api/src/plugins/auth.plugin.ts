@@ -40,7 +40,7 @@ export default fp(async (fastify: FastifyInstance) => {
 
   fastify.decorate("authenticateAdmin", async (request: FastifyRequest) => {
     await fastify.authenticate(request);
-    // Always verify admin status from DB — never trust JWT claim alone
+    // Always verify admin status from DB  --  never trust JWT claim alone
     // This ensures revoked admins lose access immediately (not after token expiry)
     const dbUser = await fastify.prisma.user.findUnique({
       where: { id: request.user.sub },

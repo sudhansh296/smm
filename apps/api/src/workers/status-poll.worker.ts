@@ -63,18 +63,18 @@ export function createStatusPollWorker(redis: Redis, prisma: PrismaClient) {
             const statuses = await client.getMultiStatus(ids);
 
             for (const order of chunk) {
-              // Fix 4: per-order isolation — one bad order does not abort the chunk
+              // Fix 4: per-order isolation  --  one bad order does not abort the chunk
               try {
-                // Fix 1: const data was missing — added here
+                // Fix 1: const data was missing  --  added here
                 const data = statuses[order.providerOrderId!] as any;
                 if (!data || data.error) continue;
 
                 const newStatus = PROVIDER_STATUS_MAP[data.status ?? ""] ?? null;
 
                 // Fix 10: missing remains from provider = unknown, not 0
-                // 0 = "fully delivered = no refund" — financial decision we need confirmation for
+                // 0 = "fully delivered = no refund"  --  financial decision we need confirmation for
                 const rawRemains   = data.remains !== undefined ? Number(data.remains) : null;
-                // Fix 5: validate remains — must be integer in [0, quantity]
+                // Fix 5: validate remains  --  must be integer in [0, quantity]
                 const remainsKnown = (
                   rawRemains !== null &&
                   !isNaN(rawRemains) &&
@@ -86,14 +86,14 @@ export function createStatusPollWorker(redis: Redis, prisma: PrismaClient) {
                 const startCount   = (data.start_count !== null && data.start_count !== undefined)
                   ? Number(data.start_count) : order.startCount;
 
-                // ── CANCEL_REQUESTED ─────────────────────────────────────────
+                // -- CANCEL_REQUESTED -----------------------------------------
                 if ((order as any).status === "CANCEL_REQUESTED") {
                   if (!newStatus) continue;
 
                   if (newStatus === "CANCELLED") {
-                    // Fix 10: if remains unknown, defer — do NOT assume 0
+                    // Fix 10: if remains unknown, defer  --  do NOT assume 0
                     if (!remainsKnown) {
-                      console.warn(`[status-poll] Order ${order.id}: CANCELLED but remains unknown — deferring refund`);
+                      console.warn(`[status-poll] Order ${order.id}: CANCELLED but remains unknown  --  deferring refund`);
                       continue; // keep CANCEL_REQUESTED, try next poll
                     }
                     const refundAmount = calcRefundAmount(order.costUsd.toString(), order.quantity, remains);
@@ -112,7 +112,7 @@ export function createStatusPollWorker(redis: Redis, prisma: PrismaClient) {
                           });
                         } catch (err) {
                           if (err instanceof AlreadyRefundedError) {
-                            console.log(`[status-poll] Order ${order.id} already refunded — skipping`);
+                            console.log(`[status-poll] Order ${order.id} already refunded  --  skipping`);
                           } else { throw err; }
                         }
                       }
@@ -121,7 +121,7 @@ export function createStatusPollWorker(redis: Redis, prisma: PrismaClient) {
                         message: `Order #${order.id.slice(-8)} cancelled. ${refundAmount.greaterThan(0) ? `$${refundAmount.toFixed(2)} refunded.` : "No refund (already delivered)."}`,
                       }});
                     });
-                    console.log(`[status-poll] ${order.id} CANCEL_REQUESTED→CANCELLED refund=$${calcRefundAmount(order.costUsd.toString(), order.quantity, remains).toFixed(2)}`);
+                    console.log(`[status-poll] ${order.id} CANCEL_REQUESTED->CANCELLED refund=$${calcRefundAmount(order.costUsd.toString(), order.quantity, remains).toFixed(2)}`);
 
                   } else if (newStatus === "PARTIAL" && remainsKnown && remains > 0) {
                     const refundAmount = calcRefundAmount(order.costUsd.toString(), order.quantity, remains);
@@ -137,7 +137,7 @@ export function createStatusPollWorker(redis: Redis, prisma: PrismaClient) {
                           });
                         } catch (err) {
                           if (err instanceof AlreadyRefundedError) {
-                            console.log(`[status-poll] Order ${order.id} already refunded — skipping`);
+                            console.log(`[status-poll] Order ${order.id} already refunded  --  skipping`);
                           } else { throw err; }
                         }
                       }
@@ -151,14 +151,14 @@ export function createStatusPollWorker(redis: Redis, prisma: PrismaClient) {
                     await prisma.order.update({ where: { id: order.id }, data: { status: "COMPLETED" as never, remains, startCount } as never });
                     await (prisma as any).notification.create({ data: {
                       userId:  order.userId,
-                      message: `Order #${order.id.slice(-8)} could not be cancelled — provider already completed delivery.`,
+                      message: `Order #${order.id.slice(-8)} could not be cancelled  --  provider already completed delivery.`,
                     }});
                   }
-                  // PROCESSING/IN_PROGRESS — leave as CANCEL_REQUESTED
+                  // PROCESSING/IN_PROGRESS  --  leave as CANCEL_REQUESTED
                   continue;
                 }
 
-                // ── Normal order ─────────────────────────────────────────────
+                // -- Normal order ---------------------------------------------
                 if (!newStatus) continue;
                 if (
                   newStatus === order.status &&
@@ -167,10 +167,10 @@ export function createStatusPollWorker(redis: Redis, prisma: PrismaClient) {
                 ) continue;
 
                 if (TERMINAL_STATUSES.has(newStatus) && REFUND_ON.has(newStatus)) {
-                  // Fix 10: unknown remains — leave order in current open status, retry next poll
+                  // Fix 10: unknown remains  --  leave order in current open status, retry next poll
                   // Do NOT move to terminal state without knowing refund amount
                   if (!remainsKnown) {
-                    console.warn(`[status-poll] Order ${order.id}: ${newStatus} but remains unknown — keeping current status for next poll`);
+                    console.warn(`[status-poll] Order ${order.id}: ${newStatus} but remains unknown  --  keeping current status for next poll`);
                     // Update startCount only, keep current status so order remains pollable
                     await prisma.order.update({ where: { id: order.id }, data: { startCount } as never });
                     continue;
@@ -189,7 +189,7 @@ export function createStatusPollWorker(redis: Redis, prisma: PrismaClient) {
                         });
                       } catch (err) {
                         if (err instanceof AlreadyRefundedError) {
-                          console.log(`[status-poll] Order ${order.id} already refunded — skipping`);
+                          console.log(`[status-poll] Order ${order.id} already refunded  --  skipping`);
                         } else { throw err; }
                       }
                       await (tx as any).notification.create({ data: {

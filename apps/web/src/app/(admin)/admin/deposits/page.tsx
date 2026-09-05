@@ -105,8 +105,8 @@ export default function AdminDepositsPage() {
             <td className="px-4 py-3"><p className="font-medium text-sm">{d.userName}</p><p className="text-xs text-muted-foreground">{d.userEmail}</p></td>
             <td className="px-4 py-3"><Badge className={"text-xs "+(METHOD_COLORS[d.method]??"bg-gray-100 text-gray-800")}>{METHOD_LABELS[d.method]??d.method}</Badge></td>
             <td className="px-4 py-3 text-right font-medium">{d.amountInr?`Rs.${d.amountInr}`:`$${d.amountUsdt} USDT`}</td>
-            <td className="px-4 py-3 text-xs font-mono truncate max-w-28">{d.txId??"—"}</td>
-            <td className="px-4 py-3 text-xs text-muted-foreground truncate max-w-24">{d.adminNote??"—"}</td>
+            <td className="px-4 py-3 text-xs font-mono truncate max-w-28">{d.txId??" -- "}</td>
+            <td className="px-4 py-3 text-xs text-muted-foreground truncate max-w-24">{d.adminNote??" -- "}</td>
             <td className="px-4 py-3 text-center"><Badge className={"text-xs "+STATUS_COLORS[d.status]}>{d.status}</Badge></td>
             <td className="px-4 py-3 text-xs text-muted-foreground">{formatDate(d.createdAt)}</td>
             <td className="px-4 py-3">{d.status==="PENDING"&&<div className="flex gap-1"><Button size="sm" className="h-7 bg-green-600 hover:bg-green-700 text-white px-2" onClick={()=>setApproveD(d)}><CheckCircle className="h-3 w-3"/></Button><Button size="sm" variant="outline" className="h-7 text-red-600 border-red-200 px-2" onClick={()=>setRejectD(d)}><XCircle className="h-3 w-3"/></Button></div>}{d.status==="COMPLETED"&&<span className="text-xs text-green-600">Approved</span>}{d.status==="FAILED"&&<span className="text-xs text-red-600">Rejected</span>}</td>

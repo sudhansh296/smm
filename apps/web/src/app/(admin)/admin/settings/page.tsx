@@ -23,7 +23,7 @@ export default function AdminSettingsPage() {
     defaultValues: { siteName: "", logoUrl: "" },
   });
 
-  // Populate form when data loads — MUST be in useEffect, not render body
+  // Populate form when data loads  --  MUST be in useEffect, not render body
   useEffect(() => {
     if (data) {
       reset({ siteName: data.siteName, logoUrl: data.logoUrl ?? "" });

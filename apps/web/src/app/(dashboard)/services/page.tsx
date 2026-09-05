@@ -65,7 +65,7 @@ export default function ServicesPage() {
 
       {data?.effectiveInrRate && (
         <p className="text-xs text-muted-foreground">
-          Rate: ₹{Number(data.effectiveInrRate).toFixed(2)} per $1 USD
+          Rate: Rs.{Number(data.effectiveInrRate).toFixed(2)} per $1 USD
         </p>
       )}
 

@@ -90,9 +90,9 @@ export default function NewOrderPage() {
           <CardDescription>
             Balance:{" "}
             <span className="font-medium text-foreground">
-              {wallet ? formatUsd(wallet.balanceUsd) : "—"}
+              {wallet ? formatUsd(wallet.balanceUsd) : " -- "}
             </span>{" "}
-            ({wallet ? formatInr(wallet.balanceInr) : "—"})
+            ({wallet ? formatInr(wallet.balanceInr) : " -- "})
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -135,7 +135,7 @@ export default function NewOrderPage() {
                 <p className="font-medium">{selectedService.name}</p>
                 <p className="text-muted-foreground text-xs sm:text-sm">
                   Rate: ${(Number(selectedService.sellingPriceUsd) * 1000).toFixed(2)} / 1000 units
-                  (₹{(Number(selectedService.sellingPriceUsd) * 1000 * Number(wallet?.effectiveInrRate ?? 85)).toFixed(2)})
+                  (Rs.{(Number(selectedService.sellingPriceUsd) * 1000 * Number(wallet?.effectiveInrRate ?? 85)).toFixed(2)})
                 </p>
                 <p className="text-muted-foreground text-xs">
                   Min: {selectedService.minQuantity.toLocaleString()} ·

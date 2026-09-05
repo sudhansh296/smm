@@ -33,12 +33,12 @@ export async function buildApp(): Promise<FastifyInstance> {
     disableRequestLogging: false,
   });
 
-  // â”€â”€ Core plugins (order matters) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // -- Core plugins (order matters) --------------------------------------
   await fastify.register(prismaPlugin);
   await fastify.register(redisPlugin);
   await fastify.register(authPlugin);
 
-  // Raw body — needed for Razorpay/Cryptomus webhook HMAC signature verification
+  // Raw body  --  needed for Razorpay/Cryptomus webhook HMAC signature verification
   await fastify.register(rawBody, {
     field: "rawBody",    // add rawBody to request object
     global: false,       // only on routes that set config.rawBody = true
@@ -46,7 +46,7 @@ export async function buildApp(): Promise<FastifyInstance> {
     runFirst: true,      // parse raw body before JSON
   });
 
-  // form-urlencoded support â€” required for API v2 (standard SMM panel format)
+  // form-urlencoded support  --  required for API v2 (standard SMM panel format)
   await fastify.register(fastifyFormbody);
 
   await fastify.register(fastifyCors, {
@@ -72,7 +72,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   await fastify.register(maintenancePlugin);
   await fastify.register(queuesPlugin);
 
-  // â”€â”€ Global error handler â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // -- Global error handler ----------------------------------------------
   fastify.setErrorHandler((error, request, reply) => {
     // Known application errors (NotFound, Unauthorized, Validation, etc.)
     if (error instanceof AppError) {
@@ -82,7 +82,7 @@ export async function buildApp(): Promise<FastifyInstance> {
       });
     }
 
-    // Zod validation errors thrown via .parse() â€” must return 400 not 500
+    // Zod validation errors thrown via .parse()  --  must return 400 not 500
     if (error instanceof ZodError) {
       const firstIssue = error.issues[0];
       const message = firstIssue
@@ -112,7 +112,7 @@ export async function buildApp(): Promise<FastifyInstance> {
       });
     }
 
-    // Everything else â€” log internally, return generic message
+    // Everything else  --  log internally, return generic message
     fastify.log.error({ err: error, reqId: request.id }, "Unhandled error");
     return reply.status(500).send({
       error: "Internal server error",
@@ -120,7 +120,7 @@ export async function buildApp(): Promise<FastifyInstance> {
     });
   });
 
-  // â”€â”€ Routes â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // -- Routes ------------------------------------------------------------
   await fastify.register(authRoutes, { prefix: "/auth" });
   await fastify.register(userRoutes, { prefix: "/user" });
   await fastify.register(serviceRoutes, { prefix: "/services" });
@@ -130,7 +130,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   await fastify.register(adminRoutes, { prefix: "/admin" });
   await fastify.register(apiV2Routes); // mounts at /api/v2
 
-  // â”€â”€ Health check â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // -- Health check ------------------------------------------------------
   fastify.get("/health", async () => ({
     status: "ok",
     timestamp: new Date().toISOString(),

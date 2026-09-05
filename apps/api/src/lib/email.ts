@@ -17,7 +17,7 @@ async function getTransporter(): Promise<Transporter> {
   if (isDev && !hasRealSmtp) {
     try {
       const testAccount = await nodemailer.createTestAccount();
-      console.log("📧 Ethereal test email account created:");
+      console.log("[EMAIL] Ethereal test email account created:");
       console.log("   User:", testAccount.user);
       console.log("   Pass:", testAccount.pass);
       console.log("   View emails at: https://ethereal.email");
@@ -30,8 +30,8 @@ async function getTransporter(): Promise<Transporter> {
       });
       return transporter;
     } catch {
-      // Fallback — just log emails to console
-      console.warn("⚠️  Could not create Ethereal account. Emails will be logged to console.");
+      // Fallback  --  just log emails to console
+      console.warn("[WARN]  Could not create Ethereal account. Emails will be logged to console.");
       transporter = nodemailer.createTransport({ jsonTransport: true });
       return transporter;
     }
@@ -79,9 +79,9 @@ export async function sendVerificationEmail(
   if (env.NODE_ENV === "development") {
     const previewUrl = nodemailer.getTestMessageUrl(info);
     if (previewUrl) {
-      console.log("📧 Verification email preview:", previewUrl);
+      console.log("[EMAIL] Verification email preview:", previewUrl);
     } else {
-      console.log("📧 Verification email would be sent to:", to);
+      console.log("[EMAIL] Verification email would be sent to:", to);
       console.log("   Verify URL:", verifyUrl);
     }
   }
@@ -118,9 +118,9 @@ export async function sendPasswordResetEmail(
   if (env.NODE_ENV === "development") {
     const previewUrl = nodemailer.getTestMessageUrl(info);
     if (previewUrl) {
-      console.log("📧 Password reset email preview:", previewUrl);
+      console.log("[EMAIL] Password reset email preview:", previewUrl);
     } else {
-      console.log("📧 Reset URL:", resetUrl);
+      console.log("[EMAIL] Reset URL:", resetUrl);
     }
   }
 }

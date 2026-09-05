@@ -83,10 +83,10 @@ export default function AdminCurrencyPage() {
               <TrendingUp className="h-5 w-5 text-primary" />
             </div>
             <div>
-              <p className="text-xs text-muted-foreground">Deposit Effective Rate (INR → USD)</p>
-              <p className="text-2xl sm:text-3xl font-bold text-primary">₹{data?.depositEffectiveRate ?? data?.effectiveRate ?? "—"} / $1</p>
+              <p className="text-xs text-muted-foreground">Deposit Effective Rate (INR -> USD)</p>
+              <p className="text-2xl sm:text-3xl font-bold text-primary">Rs.{data?.depositEffectiveRate ?? data?.effectiveRate ?? " -- "} / $1</p>
               <p className="text-xs text-muted-foreground mt-0.5">
-                Customer ₹{data?.depositEffectiveRate ?? "—"} dega = $1 wallet credit
+                Customer Rs.{data?.depositEffectiveRate ?? " -- "} dega = $1 wallet credit
               </p>
             </div>
           </div>
@@ -97,7 +97,7 @@ export default function AdminCurrencyPage() {
         <CardHeader className="pb-3">
           <CardTitle className="text-base sm:text-lg">Rate Configuration</CardTitle>
           <CardDescription className="text-xs">
-            Deposit Markup → sirf INR deposit pe profit &nbsp;|&nbsp; Service Markup → service price pe profit
+            Deposit Markup -> sirf INR deposit pe profit &nbsp;|&nbsp; Service Markup -> service price pe profit
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -106,7 +106,7 @@ export default function AdminCurrencyPage() {
             {/* INR Base Rate */}
             <div className="space-y-1.5">
               <Label htmlFor="manualInrRate" className="flex items-center gap-2">
-                <IndianRupee className="h-4 w-4" />Base INR Rate (Market rate ₹ per $1)
+                <IndianRupee className="h-4 w-4" />Base INR Rate (Market rate Rs. per $1)
               </Label>
               <Input id="manualInrRate" type="number" step="0.01" {...register("manualInrRate")} />
               {errors.manualInrRate && <p className="text-xs text-destructive">{errors.manualInrRate.message as string}</p>}
@@ -125,8 +125,8 @@ export default function AdminCurrencyPage() {
                 {depositEffective && (
                   <div className="text-xs bg-green-50 border border-green-200 rounded p-2 mt-1">
                     <p className="font-medium text-green-800">Customer ko dikhega:</p>
-                    <p className="text-green-700">₹{depositEffective} = $1</p>
-                    <p className="text-green-600">₹1000 deposit → ${(1000 / Number(depositEffective)).toFixed(2)}</p>
+                    <p className="text-green-700">Rs.{depositEffective} = $1</p>
+                    <p className="text-green-600">Rs.1000 deposit -> ${(1000 / Number(depositEffective)).toFixed(2)}</p>
                   </div>
                 )}
                 <p className="text-xs text-muted-foreground">INR deposit pe tumhara profit. USDT deposit pe nahi lagta.</p>
@@ -141,8 +141,8 @@ export default function AdminCurrencyPage() {
                 {serviceMarkup !== undefined && (
                   <div className="text-xs bg-blue-50 border border-blue-200 rounded p-2 mt-1">
                     <p className="font-medium text-blue-800">Example:</p>
-                    <p className="text-blue-700">Cost $8.00 → Sell ${(8 * (1 + Number(serviceMarkup) / 100)).toFixed(2)}</p>
-                    <p className="text-blue-700">Cost $1.00 → Sell ${(1 * (1 + Number(serviceMarkup) / 100)).toFixed(2)}</p>
+                    <p className="text-blue-700">Cost $8.00 -> Sell ${(8 * (1 + Number(serviceMarkup) / 100)).toFixed(2)}</p>
+                    <p className="text-blue-700">Cost $1.00 -> Sell ${(1 * (1 + Number(serviceMarkup) / 100)).toFixed(2)}</p>
                   </div>
                 )}
                 <p className="text-xs text-muted-foreground">Har order pe profit. INR aur USDT dono pe lagta hai.</p>
@@ -153,7 +153,7 @@ export default function AdminCurrencyPage() {
             {depositEffective && (
               <div className="rounded-lg bg-muted p-3 flex items-center gap-2 text-sm">
                 <RefreshCw className="h-4 w-4 text-muted-foreground shrink-0" />
-                Deposit effective rate preview: <strong>₹{depositEffective} / $1</strong>
+                Deposit effective rate preview: <strong>Rs.{depositEffective} / $1</strong>
               </div>
             )}
 

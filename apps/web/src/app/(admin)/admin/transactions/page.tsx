@@ -121,7 +121,7 @@ export default function AdminTransactionsPage() {
                     <td className={`px-4 py-3 text-right font-semibold ${Number(t.amountUsd) >= 0 ? "text-green-600" : "text-red-600"}`}>
                       {Number(t.amountUsd) >= 0 ? "+" : ""}{formatUsd(t.amountUsd)}
                     </td>
-                    <td className="px-4 py-3 text-right text-xs text-muted-foreground">{t.amountInr ? formatInr(t.amountInr) : "—"}</td>
+                    <td className="px-4 py-3 text-right text-xs text-muted-foreground">{t.amountInr ? formatInr(t.amountInr) : " -- "}</td>
                     <td className="px-4 py-3 text-xs text-muted-foreground max-w-[200px] truncate">{t.description}</td>
                     <td className="px-4 py-3 text-xs text-muted-foreground">{formatDate(t.createdAt)}</td>
                   </tr>

@@ -49,7 +49,7 @@ async function startWorkers() {
       let recovered = 0;
       for (const order of stuckOrders) {
         const existingJob = await queues.orderForward.getJob(order.id);
-        // Fix: check job state — completed/failed jobs are stale and must be re-enqueued
+        // Fix: check job state  --  completed/failed jobs are stale and must be re-enqueued
         const jobState = existingJob ? await existingJob.getState() : null;
         const shouldRequeue = !existingJob || ["completed", "failed", "unknown"].includes(jobState ?? "");
         if (shouldRequeue) {
@@ -59,7 +59,7 @@ async function startWorkers() {
             { orderId: order.id },
             { jobId: order.id, attempts: 3, backoff: { type: "exponential", delay: 5000 } },
           );
-          // Fix 1: proper template literal — was broken (invalid TS syntax)
+          // Fix 1: proper template literal  --  was broken (invalid TS syntax)
           console.log(`[worker-entrypoint] Recovered stuck PENDING order ${order.id} (prev state: ${jobState ?? "none"})`);
           recovered++;
         }
@@ -84,7 +84,7 @@ async function startWorkers() {
   await queues.statusPoll.add("poll-all-open-orders", {}, { repeat: { every: 120_000 } });
   console.log("[workers] Status poll job registered (every 2 min)");
 
-  // Refill status polling — checks provider for orders in "processing" refill state
+  // Refill status polling  --  checks provider for orders in "processing" refill state
   const refillStatusQueue = new (await import("bullmq")).Queue("refill-status-poll", {
     connection: redis, skipVersionCheck: true,
   });

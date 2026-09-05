@@ -66,7 +66,7 @@ export default async function loginRoute(fastify: FastifyInstance) {
 
     if (user.isSuspended) throw new ForbiddenError("Account is suspended");
 
-    // Fix: also check DB lockedUntil — Redis lock only survives Redis uptime
+    // Fix: also check DB lockedUntil  --  Redis lock only survives Redis uptime
     // DB lock survives Redis restart/flush
     if (user.lockedUntil && user.lockedUntil > new Date()) {
       const minutesLeft = Math.ceil((user.lockedUntil.getTime() - Date.now()) / 60_000);
@@ -137,7 +137,7 @@ export default async function loginRoute(fastify: FastifyInstance) {
       maxAge: 7 * 24 * 60 * 60,
     });
 
-    // HttpOnly access token cookie â€” not readable by browser JS (XSS protection)
+    // HttpOnly access token cookie  --  not readable by browser JS (XSS protection)
     reply.setCookie("accessToken", accessToken, {
       httpOnly: true,
       secure: process.env["NODE_ENV"] === "production",

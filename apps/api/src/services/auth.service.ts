@@ -60,7 +60,7 @@ export async function generateTotpEnrollment(
     const code = randomBytes(5).toString("hex").toUpperCase(); // 10-char hex
     if (!backupCodes.includes(code)) {
       backupCodes.push(code);
-      // Hash backup codes with bcrypt (lower rounds ok — they're 1-time use)
+      // Hash backup codes with bcrypt (lower rounds ok  --  they're 1-time use)
       backupCodeHashes.push(await hash(code, 10));
     }
   }
@@ -81,7 +81,7 @@ export function verifyTotpCode(encryptedSecret: string, code: string): boolean {
       period: 30,
       secret: OTPAuth.Secret.fromBase32(secret),
     });
-    // Allow ±1 window (30s drift tolerance)
+    // Allow +/-1 window (30s drift tolerance)
     const delta = totp.validate({ token: code, window: 1 });
     return delta !== null;
   } catch {

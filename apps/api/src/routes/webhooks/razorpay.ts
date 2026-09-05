@@ -52,9 +52,9 @@ export default async function razorpayWebhookRoute(fastify: FastifyInstance) {
       const { id: paymentId, order_id: razorpayOrderId, amount: amountPaise } = event.payload.payment.entity;
       const amountInr = amountPaise / 100;
 
-      // Fully atomic: idempotency check + wallet credit + deposit mark — single transaction
+      // Fully atomic: idempotency check + wallet credit + deposit mark  --  single transaction
       await fastify.prisma.$transaction(async (tx) => {
-        // Idempotency check — paymentGatewayId has unique constraint
+        // Idempotency check  --  paymentGatewayId has unique constraint
         const existing = await tx.transaction.findUnique({ where: { paymentGatewayId: paymentId } });
         if (existing) return;
 

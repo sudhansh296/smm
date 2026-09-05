@@ -8,7 +8,7 @@ import {
 import { ValidationError, ForbiddenError } from "../../lib/errors.js";
 
 export default async function totpRoute(fastify: FastifyInstance) {
-  // Begin TOTP enrollment — generates secret once and stores encrypted
+  // Begin TOTP enrollment  --  generates secret once and stores encrypted
   fastify.post(
     "/totp/enroll",
     { preHandler: [fastify.authenticate] },
@@ -22,7 +22,7 @@ export default async function totpRoute(fastify: FastifyInstance) {
 
       const enrollment = await generateTotpEnrollment(userId, user.email);
 
-      // Store encrypted secret temporarily in DB — not yet confirmed
+      // Store encrypted secret temporarily in DB  --  not yet confirmed
       await fastify.prisma.user.update({
         where: { id: userId },
         data: { totpSecretEncrypted: enrollment.encryptedSecret },
@@ -35,7 +35,7 @@ export default async function totpRoute(fastify: FastifyInstance) {
     },
   );
 
-  // Confirm TOTP enrollment — verifies OTP against the SAME secret stored during enroll
+  // Confirm TOTP enrollment  --  verifies OTP against the SAME secret stored during enroll
   fastify.post(
     "/totp/verify",
     { preHandler: [fastify.authenticate] },
@@ -52,9 +52,9 @@ export default async function totpRoute(fastify: FastifyInstance) {
         throw new ValidationError("2FA is already enabled");
       }
 
-      // Verify OTP against the SAME secret stored during enrollment — never regenerate here
+      // Verify OTP against the SAME secret stored during enrollment  --  never regenerate here
       const valid = verifyTotpCode(user.totpSecretEncrypted, code);
-      if (!valid) throw new ValidationError("Invalid 2FA code — check your authenticator app");
+      if (!valid) throw new ValidationError("Invalid 2FA code  --  check your authenticator app");
 
       // Only NOW generate backup codes (enrollment secret stays the same)
       const { backupCodes, backupCodeHashes } = await generateBackupCodes();
@@ -64,7 +64,7 @@ export default async function totpRoute(fastify: FastifyInstance) {
           where: { id: userId },
           data: {
             totpEnabled: true,
-            // totpSecretEncrypted stays as-is — DO NOT overwrite
+            // totpSecretEncrypted stays as-is  --  DO NOT overwrite
           },
         }),
         fastify.prisma.totpBackupCode.deleteMany({ where: { userId } }),
@@ -75,12 +75,12 @@ export default async function totpRoute(fastify: FastifyInstance) {
 
       return reply.send({
         message: "2FA enabled successfully",
-        backupCodes, // Shown once — user must save these
+        backupCodes, // Shown once  --  user must save these
       });
     },
   );
 
-  // Disable TOTP — requires current TOTP code or a valid backup code
+  // Disable TOTP  --  requires current TOTP code or a valid backup code
   fastify.post(
     "/totp/disable",
     { preHandler: [fastify.authenticate] },
@@ -122,7 +122,7 @@ export default async function totpRoute(fastify: FastifyInstance) {
   );
 }
 
-// Separate backup code generation — does NOT touch TOTP secret
+// Separate backup code generation  --  does NOT touch TOTP secret
 import { randomBytes } from "crypto";
 import bcrypt from "bcryptjs";
 async function generateBackupCodes(): Promise<{ backupCodes: string[]; backupCodeHashes: string[] }> {

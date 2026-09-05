@@ -38,7 +38,7 @@ export default function OrdersPage() {
         params: { status: status === "ALL" ? undefined : status, page, limit: 20 },
       }).then((r) => r.data),
     placeholderData: (prev) => prev,
-    // Fix 6: auto-refresh every 30s so PENDINGâ†’PROCESSINGâ†’COMPLETED updates without manual reload
+    // Fix 6: auto-refresh every 30s so PENDING->PROCESSING->COMPLETED updates without manual reload
     refetchInterval: 30_000,
     staleTime: 0,
   });

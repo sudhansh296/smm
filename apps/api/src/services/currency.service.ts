@@ -21,7 +21,7 @@ export async function getEffectiveInrRate(
 
   if (!settings) throw new Error("CurrencySettings not initialised. Run seed first.");
 
-  // Use depositMarkupPercent for INR → USD conversion
+  // Use depositMarkupPercent for INR -> USD conversion
   const depositMarkup = Number((settings as any).depositMarkupPercent ?? settings.markupPercent);
   const effective = computeEffectiveRate(
     Number(settings.manualInrRate),
@@ -36,8 +36,8 @@ export async function getEffectiveInrRate(
 
 /**
  * Updates the INR rate in both DB and Redis.
- * source="manual" → keeps lastFetchedRate unchanged
- * source="auto"   → sets lastFetchedRate + lastFetchedAt
+ * source="manual" -> keeps lastFetchedRate unchanged
+ * source="auto"   -> sets lastFetchedRate + lastFetchedAt
  */
 export async function setInrRate(
   redis: Redis,

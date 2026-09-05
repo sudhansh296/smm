@@ -29,7 +29,7 @@ export default function DashboardPage() {
   const stats = [
     {
       label: "Wallet Balance",
-      value: walletData ? formatUsd(walletData.balanceUsd) : "—",
+      value: walletData ? formatUsd(walletData.balanceUsd) : " -- ",
       sub: walletData ? formatInr(walletData.balanceInr) : "",
       icon: Wallet,
       color: "text-primary",
@@ -37,7 +37,7 @@ export default function DashboardPage() {
     },
     {
       label: "Total Orders",
-      value: ordersData?.total ?? "—",
+      value: ordersData?.total ?? " -- ",
       sub: "All time",
       icon: ShoppingCart,
       color: "text-blue-600",
@@ -48,7 +48,7 @@ export default function DashboardPage() {
       value:
         ordersData?.orders?.filter((o: { status: string }) =>
           ["PENDING", "PROCESSING", "IN_PROGRESS"].includes(o.status),
-        ).length ?? "—",
+        ).length ?? " -- ",
       sub: "In progress",
       icon: Clock,
       color: "text-orange-600",
@@ -56,7 +56,7 @@ export default function DashboardPage() {
     },
     {
       label: "INR Rate",
-      value: walletData ? `₹${Number(walletData.effectiveInrRate).toFixed(2)}` : "—",
+      value: walletData ? `Rs.${Number(walletData.effectiveInrRate).toFixed(2)}` : " -- ",
       sub: "Per $1 USD",
       icon: TrendingUp,
       color: "text-green-600",
@@ -75,7 +75,7 @@ export default function DashboardPage() {
         </p>
       </div>
 
-      {/* Stats grid — 2 cols on mobile, 4 on desktop */}
+      {/* Stats grid  --  2 cols on mobile, 4 on desktop */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
         {stats.map((stat) => (
           <Card key={stat.label} className="overflow-hidden">
@@ -99,7 +99,7 @@ export default function DashboardPage() {
         ))}
       </div>
 
-      {/* Quick actions — wrap on mobile */}
+      {/* Quick actions  --  wrap on mobile */}
       <div className="flex flex-wrap gap-2 sm:gap-3">
         <Button asChild size="sm" className="sm:h-10 sm:px-4">
           <Link href="/new-order">Place New Order</Link>

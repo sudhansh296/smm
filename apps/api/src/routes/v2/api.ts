@@ -28,7 +28,7 @@ const V2_STATUS_MAP: Record<string, string> = {
   IN_PROGRESS:      "In progress",
   COMPLETED:        "Completed",
   PARTIAL:          "Partial",
-  CANCEL_REQUESTED: "Processing", // Cancellation in progress — show as Processing to API clients
+  CANCEL_REQUESTED: "Processing", // Cancellation in progress  --  show as Processing to API clients
   CANCELLED:        "Canceled",
   REFUNDED:         "Canceled",
 };
@@ -83,7 +83,7 @@ export default async function apiV2Route(fastify: FastifyInstance) {
       case "add": {
         const serviceId = params["service"];
         const link = params["link"];
-        // Fix: strict integer parsing — parseInt("10abc") would return 10, use coerce+int instead
+        // Fix: strict integer parsing  --  parseInt("10abc") would return 10, use coerce+int instead
         const rawQty = params["quantity"];
         const qtyParsed = z.coerce.number().int().positive().safeParse(rawQty);
         const quantity = qtyParsed.success ? qtyParsed.data : 0;
@@ -202,7 +202,7 @@ export default async function apiV2Route(fastify: FastifyInstance) {
       }
 
       case "cancel": {
-        // Fix #1: use shared cancelOrder() service — same two-phase logic as user/admin routes
+        // Fix #1: use shared cancelOrder() service  --  same two-phase logic as user/admin routes
         // No more old code: no refundOrderTx, no ProviderClient, no direct DB writes here
         const orderIds = params["orders"]?.split(",").slice(0, 100) ?? [];
         if (!orderIds.length) return reply.status(400).send({ error: "Missing orders parameter" });

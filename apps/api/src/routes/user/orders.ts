@@ -42,7 +42,7 @@ export default async function userOrdersRoute(fastify: FastifyInstance) {
     });
   });
 
-  // Cancel — delegates to shared cancel.service (fixes #1 FORWARDING, #2 provider response check)
+  // Cancel  --  delegates to shared cancel.service (fixes #1 FORWARDING, #2 provider response check)
   fastify.post("/orders/:id/cancel", { preHandler: [fastify.authenticate] }, async (request, reply) => {
     const { id } = z.object({ id: z.string() }).parse(request.params);
     const result = await cancelOrder(fastify.prisma, id, request.user.sub, false);
@@ -66,7 +66,7 @@ export default async function userOrdersRoute(fastify: FastifyInstance) {
       where: {
         id, userId,
         status: { in: ["COMPLETED", "PARTIAL"] } as never,
-        // Fix: NULL refillStatus must also be allowed — notIn alone may not match NULL in SQL
+        // Fix: NULL refillStatus must also be allowed  --  notIn alone may not match NULL in SQL
         OR: [
           { refillStatus: null },
           { refillStatus: { notIn: ["pending", "processing"] } },
@@ -88,7 +88,7 @@ export default async function userOrdersRoute(fastify: FastifyInstance) {
         removeOnFail: true,
       });
     } catch (queueErr) {
-      // Queue add failed — revert to not-pending so user can try again
+      // Queue add failed  --  revert to not-pending so user can try again
       await fastify.prisma.order.updateMany({
         where: { id, refillStatus: "pending" },
         data: { refillStatus: "failed" },

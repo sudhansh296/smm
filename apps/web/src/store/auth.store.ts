@@ -16,7 +16,7 @@ export const useAuthStore = create<AuthState>()(
       user: null,
       accessToken: null,
       setAuth: (user, _accessToken) =>
-        // accessToken is an HttpOnly cookie — we only persist the user profile
+        // accessToken is an HttpOnly cookie  --  we only persist the user profile
         set({ user, accessToken: null }),
       updateUser: (partial) =>
         set((state) => ({

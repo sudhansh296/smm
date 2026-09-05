@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
@@ -17,9 +17,9 @@ import Link from "next/link";
 
 declare global { interface Window { Razorpay: new (o: object) => { open(): void }; } }
 
-const rzpSchema = z.object({ amountInr: z.coerce.number().min(50, "Minimum ₹50").max(100000) });
+const rzpSchema = z.object({ amountInr: z.coerce.number().min(50, "Minimum Rs.50").max(100000) });
 const manualSchema = z.object({
-  amountInr: z.coerce.number().min(50, "Minimum ₹50").max(100000),
+  amountInr: z.coerce.number().min(50, "Minimum Rs.50").max(100000),
   utrNumber: z.string().min(6, "Enter valid UTR / Transaction ID"),
   note: z.string().optional(),
 });
@@ -49,7 +49,7 @@ export default function DepositInrPage() {
 
       if (isMock) {
         // Dev mode: simulate payment
-        toast.info("Mock mode — simulating payment...");
+        toast.info("Mock mode  --  simulating payment...");
         await new Promise(r => setTimeout(r, 1000));
         const verifyRes = await api.post("/deposits/razorpay/verify", {
           razorpay_order_id: razorpayOrderId,
@@ -110,7 +110,7 @@ export default function DepositInrPage() {
         <Button asChild variant="ghost" size="sm"><Link href="/wallet"><ArrowLeft className="h-4 w-4" /></Link></Button>
         <div>
           <h1 className="text-2xl sm:text-3xl font-bold">Deposit INR</h1>
-          <p className="text-muted-foreground text-sm">Rate: ₹{effectiveRate.toFixed(2)} = $1</p>
+          <p className="text-muted-foreground text-sm">Rate: Rs.{effectiveRate.toFixed(2)} = $1</p>
         </div>
       </div>
 
@@ -129,12 +129,12 @@ export default function DepositInrPage() {
         <Card>
           <CardHeader className="pb-3">
             <CardTitle className="text-base">Pay via Razorpay</CardTitle>
-            <CardDescription>UPI · Cards · Net Banking — Instant credit</CardDescription>
+            <CardDescription>UPI · Cards · Net Banking  --  Instant credit</CardDescription>
           </CardHeader>
           <CardContent>
             <form onSubmit={rzpForm.handleSubmit(onRazorpay)} className="space-y-4">
               <div className="space-y-1.5">
-                <Label>Amount (₹)</Label>
+                <Label>Amount (Rs.)</Label>
                 <div className="relative">
                   <IndianRupee className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
                   <Input type="number" placeholder="500" min={50} max={100000} className="pl-9" {...rzpForm.register("amountInr")} />
@@ -145,7 +145,7 @@ export default function DepositInrPage() {
                 {quickAmounts.map((amt) => (
                   <button key={amt} type="button" onClick={() => rzpForm.setValue("amountInr", amt)}
                     className="py-1.5 text-xs border rounded-md hover:bg-primary hover:text-primary-foreground hover:border-primary transition-colors font-medium">
-                    ₹{amt.toLocaleString()}
+                    Rs.{amt.toLocaleString()}
                   </button>
                 ))}
               </div>
@@ -203,11 +203,11 @@ export default function DepositInrPage() {
                     </div>
                   ))}
                 </div>
-                <p className="text-xs text-muted-foreground">Set your bank details in Admin → Settings</p>
+                <p className="text-xs text-muted-foreground">Set your bank details in Admin -> Settings</p>
 
                 <form onSubmit={manualForm.handleSubmit(onManual)} className="space-y-3">
                   <div className="space-y-1.5">
-                    <Label>Amount Transferred (₹)</Label>
+                    <Label>Amount Transferred (Rs.)</Label>
                     <div className="relative">
                       <IndianRupee className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
                       <Input type="number" placeholder="500" className="pl-9" {...manualForm.register("amountInr")} />

@@ -42,12 +42,12 @@ export default async function adminDepositsRoute(fastify: FastifyInstance) {
     });
   });
 
-  // Approve deposit — atomic, idempotent, race-safe, uses snapshot rate
+  // Approve deposit  --  atomic, idempotent, race-safe, uses snapshot rate
   fastify.post("/deposits/:id/approve", { preHandler: [fastify.authenticateAdmin] }, async (request, reply) => {
     const { id } = z.object({ id: z.string() }).parse(request.params);
     const { note } = z.object({ note: z.string().optional() }).parse(request.body);
 
-    // Idempotency key — unique constraint on paymentGatewayId prevents double-credit
+    // Idempotency key  --  unique constraint on paymentGatewayId prevents double-credit
     const idempotencyKey = `admin-deposit-approve:${id}`;
 
     let approvedAmount = "";
@@ -73,13 +73,13 @@ export default async function adminDepositsRoute(fastify: FastifyInstance) {
       if (deposit.status === "COMPLETED") throw new ValidationError("Already approved");
       if (deposit.status === "FAILED") throw new ValidationError("Cannot approve a rejected deposit");
 
-      // Check idempotency — if already credited (shouldn't happen but guard)
+      // Check idempotency  --  if already credited (shouldn't happen but guard)
       const existing = await tx.transaction.findUnique({ where: { paymentGatewayId: idempotencyKey } });
       if (existing) throw new ValidationError("Already approved");
 
       const isUsdt = deposit.method === "MANUAL_USDT" || deposit.gateway === "cryptomus";
 
-      // Use snapshot rate if available — never current rate (fixes #10/#11)
+      // Use snapshot rate if available  --  never current rate (fixes #10/#11)
       let amountUsd: Decimal;
       if (isUsdt) {
         amountUsd = new Decimal(deposit.amountUsdt ?? "0");
@@ -134,7 +134,7 @@ export default async function adminDepositsRoute(fastify: FastifyInstance) {
     const deposit = await fastify.prisma.depositRequest.findUnique({ where: { id } }) as any;
     if (!deposit) throw new NotFoundError("Deposit not found");
 
-    // Atomic conditional update — only succeeds if still PENDING
+    // Atomic conditional update  --  only succeeds if still PENDING
     // Prevents approve+reject race where both could run simultaneously
     const updated = await fastify.prisma.depositRequest.updateMany({
       where: { id, status: "PENDING" } as any,
@@ -142,7 +142,7 @@ export default async function adminDepositsRoute(fastify: FastifyInstance) {
     });
 
     if (updated.count === 0) {
-      throw new ValidationError(`Cannot reject deposit — current status is not PENDING`);
+      throw new ValidationError(`Cannot reject deposit  --  current status is not PENDING`);
     }
 
     await fastify.prisma.notification.create({

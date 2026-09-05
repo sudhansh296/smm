@@ -4,7 +4,7 @@ import { Decimal } from "decimal.js";
 import { NotFoundError, ValidationError } from "../../lib/errors.js";
 
 export default async function adminServicesRoute(fastify: FastifyInstance) {
-  // List all services — exclude soft-deleted
+  // List all services  --  exclude soft-deleted
   fastify.get("/services", { preHandler: [fastify.authenticateAdmin] }, async (request, reply) => {
     const { categoryId, providerId } = z
       .object({ categoryId: z.string().optional(), providerId: z.string().optional() })
@@ -157,7 +157,7 @@ export default async function adminServicesRoute(fastify: FastifyInstance) {
     },
   );
 
-  // Soft-delete service — sets deletedAt + disables instead of hard DELETE
+  // Soft-delete service  --  sets deletedAt + disables instead of hard DELETE
   // Hard delete fails when historical orders reference this service row
   fastify.delete(
     "/services/:id",

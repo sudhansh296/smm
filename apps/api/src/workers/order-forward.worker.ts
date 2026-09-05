@@ -25,17 +25,17 @@ export function createOrderForwardWorker(redis: Redis, prisma: PrismaClient) {
         return;
       }
 
-      // Fix 3: FORWARDING state — if order is FORWARDING, provider call is in progress
+      // Fix 3: FORWARDING state  --  if order is FORWARDING, provider call is in progress
       // This means a prior attempt sent to provider; treat same as providerOrderId set
       if ((order as any).status === "FORWARDING") {
         console.warn(
-          `[order-forward] Order ${orderId} is in FORWARDING state — previous attempt may have ` +
+          `[order-forward] Order ${orderId} is in FORWARDING state  --  previous attempt may have ` +
           `reached provider but response was lost. Leaving for manual admin review.`
         );
         return;
       }
 
-      // Already forwarded — ensure PROCESSING, do not re-send
+      // Already forwarded  --  ensure PROCESSING, do not re-send
       if (order.providerOrderId) {
         console.log(`[order-forward] Order ${orderId} already forwarded (${order.providerOrderId})`);
         if (order.status === "PENDING") {
@@ -52,7 +52,7 @@ export function createOrderForwardWorker(redis: Redis, prisma: PrismaClient) {
         return;
       }
 
-      // ── Redis lock — prevents duplicate upstream orders on BullMQ retry ──────
+      // -- Redis lock  --  prevents duplicate upstream orders on BullMQ retry ------
       // Fix 1: Lock is only held during the actual provider HTTP call.
       // On KNOWN provider error (e.g. insufficient balance, service not found),
       // we delete the lock so the next BullMQ retry can attempt again cleanly.
@@ -62,7 +62,7 @@ export function createOrderForwardWorker(redis: Redis, prisma: PrismaClient) {
 
       if (!lockAcquired) {
         // Lock exists + no providerOrderId = prior attempt may have reached provider
-        // but we lost the response. Cannot safely re-send — leave PENDING for admin.
+        // but we lost the response. Cannot safely re-send  --  leave PENDING for admin.
         console.error(
           `[order-forward] Order ${orderId}: lock held, no providerOrderId. ` +
           `Possible lost response. Staying PENDING for admin review.`
@@ -85,7 +85,7 @@ export function createOrderForwardWorker(redis: Redis, prisma: PrismaClient) {
       }
 
       try {
-        // ── Try PRIMARY provider ────────────────────────────────────────────────
+        // -- Try PRIMARY provider ------------------------------------------------
         const primaryClient = new ProviderClient(order.service.provider);
         const result = await primaryClient.addOrder(
           order.service.providerServiceId,
@@ -94,7 +94,7 @@ export function createOrderForwardWorker(redis: Redis, prisma: PrismaClient) {
         );
 
         if (!("error" in result)) {
-          // Try to update — but order may now be CANCEL_REQUESTED (user cancelled while we were calling provider)
+          // Try to update  --  but order may now be CANCEL_REQUESTED (user cancelled while we were calling provider)
           const updated = await prisma.order.updateMany({
             where: { id: orderId, status: { in: ["FORWARDING"] } } as never,
             data: {
@@ -126,21 +126,21 @@ export function createOrderForwardWorker(redis: Redis, prisma: PrismaClient) {
                 console.warn(`[order-forward] Immediate cancel attempt returned error: ${cancelResult.error}. Status-poll will retry.`);
               } else {
                 console.log(`[order-forward] Immediate provider cancel succeeded for ${orderId}.`);
-                // Status-poll will finalize CANCEL_REQUESTED → CANCELLED + refund when it polls
+                // Status-poll will finalize CANCEL_REQUESTED -> CANCELLED + refund when it polls
               }
             } catch (cancelErr) {
               console.warn(`[order-forward] Immediate cancel attempt threw for ${orderId}:`, cancelErr);
             }
           } else {
-            console.log(`[order-forward] Order ${orderId} forwarded via PRIMARY → ${result.order}`);
+            console.log(`[order-forward] Order ${orderId} forwarded via PRIMARY -> ${result.order}`);
           }
 
           await redis.del(lockKey);
           return;
         }
 
-        // ── Primary returned KNOWN error — try BACKUP ───────────────────────────
-        // Fix 1: known provider error → delete lock so retry can attempt backup next time
+        // -- Primary returned KNOWN error  --  try BACKUP ---------------------------
+        // Fix 1: known provider error -> delete lock so retry can attempt backup next time
         console.warn(`[order-forward] Primary failed for ${orderId}: ${result.error}`);
 
         const backupProviderId = order.service.backupProviderId;
@@ -165,7 +165,7 @@ export function createOrderForwardWorker(redis: Redis, prisma: PrismaClient) {
               });
 
               if (backupUpdated.count === 0) {
-                // Order was CANCEL_REQUESTED — save providerOrderId and attempt immediate cancel
+                // Order was CANCEL_REQUESTED  --  save providerOrderId and attempt immediate cancel
                 await prisma.order.update({
                   where: { id: orderId },
                   data: {
@@ -183,14 +183,14 @@ export function createOrderForwardWorker(redis: Redis, prisma: PrismaClient) {
                   console.warn(`[order-forward] Backup immediate cancel threw:`, cancelErr);
                 }
               } else {
-                console.log(`[order-forward] Order ${orderId} forwarded via BACKUP → ${backupResult.order}`);
+                console.log(`[order-forward] Order ${orderId} forwarded via BACKUP -> ${backupResult.order}`);
               }
 
               await redis.del(lockKey);
               return;
             }
 
-            // Both failed with known errors — delete lock and revert to PENDING for retry
+            // Both failed with known errors  --  delete lock and revert to PENDING for retry
             await redis.del(lockKey);
             await prisma.order.updateMany({
               where: { id: orderId, status: "FORWARDING" } as never,
@@ -200,7 +200,7 @@ export function createOrderForwardWorker(redis: Redis, prisma: PrismaClient) {
           }
         }
 
-        // No backup — delete lock and revert FORWARDING→PENDING for retry
+        // No backup  --  delete lock and revert FORWARDING->PENDING for retry
         await redis.del(lockKey);
         await prisma.order.updateMany({
           where: { id: orderId, status: "FORWARDING" } as never,
@@ -209,13 +209,13 @@ export function createOrderForwardWorker(redis: Redis, prisma: PrismaClient) {
         throw new Error(`Provider error: ${result.error}`);
 
       } catch (err) {
-        // Network/timeout error — do NOT delete lock (provider may have accepted)
-        // Revert FORWARDING→PENDING only for non-network errors (already thrown above for those)
+        // Network/timeout error  --  do NOT delete lock (provider may have accepted)
+        // Revert FORWARDING->PENDING only for non-network errors (already thrown above for those)
         // For unexpected errors, revert to PENDING so admin can investigate
         const isKnownError = err instanceof Error && err.message.startsWith("Provider error:");
         const isBothFailed = err instanceof Error && err.message.startsWith("Both providers failed");
         if (!isKnownError && !isBothFailed) {
-          // Unexpected error — could be network timeout — keep lock, leave as FORWARDING for manual review
+          // Unexpected error  --  could be network timeout  --  keep lock, leave as FORWARDING for manual review
           console.error(`[order-forward] Unexpected error for ${orderId}:`, err);
         }
         throw err;
@@ -224,7 +224,7 @@ export function createOrderForwardWorker(redis: Redis, prisma: PrismaClient) {
     { connection: redis, skipVersionCheck: true, concurrency: 5 },
   );
 
-  // All retries exhausted — only refund if provider NEVER accepted (no providerOrderId)
+  // All retries exhausted  --  only refund if provider NEVER accepted (no providerOrderId)
   worker.on("failed", async (
     job: { data: OrderForwardJobData; opts: { attempts?: number }; attemptsMade: number } | undefined,
     err: Error,
@@ -245,7 +245,7 @@ export function createOrderForwardWorker(redis: Redis, prisma: PrismaClient) {
 
       if (!order || order.refundedAt) return;
 
-      // Provider accepted the order — do not auto-refund, needs manual review
+      // Provider accepted the order  --  do not auto-refund, needs manual review
       if (order.providerOrderId) {
         console.error(
           `[order-forward] Order ${orderId} has providerOrderId but all retries failed. Manual review needed.`
@@ -253,7 +253,7 @@ export function createOrderForwardWorker(redis: Redis, prisma: PrismaClient) {
         return;
       }
 
-      // FORWARDING state = unknown whether provider got it — leave for admin
+      // FORWARDING state = unknown whether provider got it  --  leave for admin
       if (order.status === "FORWARDING") {
         console.error(
           `[order-forward] Order ${orderId} stuck in FORWARDING. Provider response unknown. Manual review needed.`
@@ -261,7 +261,7 @@ export function createOrderForwardWorker(redis: Redis, prisma: PrismaClient) {
         return;
       }
 
-      // PENDING with no providerOrderId — provider never accepted, safe to refund
+      // PENDING with no providerOrderId  --  provider never accepted, safe to refund
       if (order.status !== "PENDING") return;
 
       await prisma.$transaction(async (tx) => {

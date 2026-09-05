@@ -26,10 +26,10 @@ export default fp(async (fastify: FastifyInstance) => {
 
     if (!maintenanceMode) return;
 
-    // Allow admins through — use jwtVerify() (NEVER jwt.decode which skips verification)
+    // Allow admins through  --  use jwtVerify() (NEVER jwt.decode which skips verification)
     try {
       await request.jwtVerify();
-      // JWT is valid — now verify admin status against DB (not just JWT claim)
+      // JWT is valid  --  now verify admin status against DB (not just JWT claim)
       const userId = (request.user as { sub: string }).sub;
       const dbUser = await fastify.prisma.user.findUnique({
         where: { id: userId },
@@ -37,7 +37,7 @@ export default fp(async (fastify: FastifyInstance) => {
       });
       if (dbUser?.isAdmin && !dbUser.isSuspended) return;
     } catch {
-      // Not authenticated or invalid token — fall through to 503
+      // Not authenticated or invalid token  --  fall through to 503
     }
 
     return reply.status(503).send({

@@ -33,7 +33,7 @@ export default async function cryptomusWebhookRoute(fastify: FastifyInstance) {
       return reply.status(400).send({ error: "Invalid payload" });
     }
 
-    // Fully atomic: idempotency + wallet credit + deposit complete — single transaction
+    // Fully atomic: idempotency + wallet credit + deposit complete  --  single transaction
     await fastify.prisma.$transaction(async (tx) => {
       const existing = await tx.transaction.findUnique({ where: { paymentGatewayId: cryptomusUuid } });
       if (existing) return; // Already processed
