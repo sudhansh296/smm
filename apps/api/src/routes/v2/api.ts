@@ -142,7 +142,10 @@ export default async function apiV2Route(fastify: FastifyInstance) {
           where: {
             id: orderId, userId: user.id,
             status: { in: ["COMPLETED", "PARTIAL"] },
-            refillStatus: { notIn: ["pending", "processing"] },
+            OR: [
+              { refillStatus: null },
+              { refillStatus: { notIn: ["pending", "processing"] } },
+            ],
           },
           data: { refillRequestedAt: new Date(), refillStatus: "pending" },
         });
@@ -150,11 +153,19 @@ export default async function apiV2Route(fastify: FastifyInstance) {
           return reply.status(400).send({ error: "A refill is already in progress" });
         }
         const bucket = Math.floor(Date.now() / (5 * 60 * 1000));
-        await fastify.queues.refill.add("refill", { orderId }, {
-          jobId: `refill:${orderId}:${bucket}`,
-          removeOnComplete: true,
-          removeOnFail: true,
-        });
+        try {
+          await fastify.queues.refill.add("refill", { orderId }, {
+            jobId: `refill:${orderId}:${bucket}`,
+            removeOnComplete: true,
+            removeOnFail: true,
+          });
+        } catch (queueErr) {
+          await fastify.prisma.order.updateMany({
+            where: { id: orderId, refillStatus: "pending" },
+            data: { refillStatus: "failed" },
+          });
+          return reply.status(500).send({ error: "Failed to queue refill request. Please try again." });
+        }
         return reply.send({ refill: orderId });
       }
 

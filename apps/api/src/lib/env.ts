@@ -29,12 +29,15 @@ const envSchema = z.object({
   GOOGLE_CLIENT_SECRET: z.string().min(1).optional(),
   GOOGLE_CALLBACK_URL: z.string().url().optional(),
 
-  // Email (SMTP)
-  SMTP_HOST: z.string().min(1),
+  // Email (SMTP) — optional in dev (Ethereal fallback), required in production
+  SMTP_HOST: z.string().optional().default(""),
   SMTP_PORT: z.coerce.number().default(587),
-  SMTP_USER: z.string().min(1),
-  SMTP_PASSWORD: z.string().min(1),
-  SMTP_FROM: z.string().min(1),
+  SMTP_USER: z.string().optional().default(""),
+  SMTP_PASSWORD: z.string().optional().default(""),
+  SMTP_FROM: z.string().optional().default("NexusSMM <noreply@example.com>"),
+
+  // API base URL for webhook callbacks
+  API_BASE_URL: z.string().url().optional(),
 
   // Razorpay
   RAZORPAY_KEY_ID: z.string().default("mock"),

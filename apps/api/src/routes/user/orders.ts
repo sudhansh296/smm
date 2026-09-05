@@ -66,7 +66,11 @@ export default async function userOrdersRoute(fastify: FastifyInstance) {
       where: {
         id, userId,
         status: { in: ["COMPLETED", "PARTIAL"] } as never,
-        refillStatus: { notIn: ["pending", "processing"] },
+        // Fix: NULL refillStatus must also be allowed — notIn alone may not match NULL in SQL
+        OR: [
+          { refillStatus: null },
+          { refillStatus: { notIn: ["pending", "processing"] } },
+        ],
       },
       data: { refillRequestedAt: new Date(), refillStatus: "pending" },
     });
@@ -76,11 +80,21 @@ export default async function userOrdersRoute(fastify: FastifyInstance) {
     }
 
     const bucket = Math.floor(Date.now() / (5 * 60 * 1000));
-    await fastify.queues.refill.add("refill", { orderId: id }, {
-      jobId: `refill:${id}:${bucket}`,
-      removeOnComplete: true,
-      removeOnFail: true,
-    });
+    // Fix 6: if queue add fails, revert refillStatus so user can retry
+    try {
+      await fastify.queues.refill.add("refill", { orderId: id }, {
+        jobId: `refill:${id}:${bucket}`,
+        removeOnComplete: true,
+        removeOnFail: true,
+      });
+    } catch (queueErr) {
+      // Queue add failed — revert to not-pending so user can try again
+      await fastify.prisma.order.updateMany({
+        where: { id, refillStatus: "pending" },
+        data: { refillStatus: "failed" },
+      });
+      throw queueErr;
+    }
 
     return reply.send({ message: "Refill requested" });
   });

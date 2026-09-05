@@ -100,12 +100,18 @@ export async function verifyBackupCode(
   const codes = await prisma.totpBackupCode.findMany({
     where: { userId, usedAt: null },
   });
-
   for (const backupCode of codes) {
-    const match = await compare(code, backupCode.codeHash);
-    if (match) return backupCode.id;
+    const isMatch = await compare(code, backupCode.codeHash);
+    if (isMatch) {
+      // Atomic consumption -- two concurrent requests: only one gets count=1
+      const consumed = await prisma.totpBackupCode.updateMany({
+        where: { id: backupCode.id, usedAt: null },
+        data: { usedAt: new Date() },
+      });
+      if (consumed.count === 0) return null; // already consumed by concurrent request
+      return backupCode.id;
+    }
   }
   return null;
 }
-
 export { generateToken, hashRefreshToken };

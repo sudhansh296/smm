@@ -59,10 +59,24 @@ export async function cancelOrder(
       throw new ValidationError(`Order status changed to ${fresh?.status ?? "unknown"} — please retry`);
     }
     if (order.providerOrderId) {
-      const provider = await loadFulfillmentProvider(prisma, order);
-      const result = await attemptProviderCancel(provider, order.providerOrderId);
-      if (result === "cancelled") {
-        await finaliseCancel(prisma, orderId, order, undefined);
+      const fwdProvider = await loadFulfillmentProvider(prisma, order);
+      const cancelResult = await attemptProviderCancel(fwdProvider, order.providerOrderId);
+      if (cancelResult === "cancelled") {
+        // Fix 9: need confirmed remains before refunding — same as PROCESSING path
+        let fwdRemains: number | undefined;
+        let fwdFetchOk = false;
+        try {
+          const fwdClient = new ProviderClient(fwdProvider);
+          const fwdStatus = await fwdClient.getStatus(order.providerOrderId);
+          if (!("error" in fwdStatus) && fwdStatus.status !== undefined && fwdStatus.remains !== undefined) {
+            const parsed = Number(fwdStatus.remains);
+            if (!isNaN(parsed)) { fwdRemains = parsed; fwdFetchOk = true; }
+          }
+        } catch { /* network error — stay CANCEL_REQUESTED */ }
+        if (!fwdFetchOk) {
+          return { status: "CANCEL_REQUESTED", refunded: false, message: "Cancellation accepted. Refund calculated once delivery status confirmed." };
+        }
+        await finaliseCancel(prisma, orderId, order, fwdRemains);
         return { status: "CANCELLED", refunded: true, message: "Order cancelled and refunded" };
       }
     }
@@ -71,9 +85,11 @@ export async function cancelOrder(
 
   // PENDING with no providerOrderId — nothing sent to provider
   if (order.status === "PENDING" && !order.providerOrderId) {
-    await prisma.$transaction(async (tx) => {
+    // Fix 7: transaction returns boolean so we know if cancel actually happened
+    // Race: worker may have changed status to FORWARDING between our read and the lock
+    const didCancel = await prisma.$transaction(async (tx) => {
       const locked = await tx.$queryRaw<Array<{ status: string }>>`SELECT status FROM orders WHERE id = ${orderId} FOR UPDATE`;
-      if (!locked[0] || locked[0].status !== "PENDING") return;
+      if (!locked[0] || locked[0].status !== "PENDING") return false; // status changed — don't cancel
       await tx.order.update({ where: { id: orderId }, data: { status: "CANCELLED" } });
       await refundOrderTx(tx as Parameters<typeof refundOrderTx>[0], orderId, {
         userId: order.userId,
@@ -82,8 +98,21 @@ export async function cancelOrder(
         description: `Refund: order #${orderId.slice(-8)} cancelled (not forwarded to provider)`,
       });
       await tx.notification.create({ data: { userId: order.userId, message: `Order #${orderId.slice(-8)} cancelled. $${new Decimal(order.costUsd.toString()).toFixed(2)} refunded.` } });
+      return true;
     });
-    return { status: "CANCELLED", refunded: true, message: "Order cancelled and refunded" };
+
+    if (didCancel) {
+      return { status: "CANCELLED", refunded: true, message: "Order cancelled and refunded" };
+    }
+
+    // Status changed between read and lock (e.g. FORWARDING) — re-read and handle
+    const fresh = await prisma.order.findUnique({ where: { id: orderId }, select: { status: true, providerOrderId: true } }) as any;
+    if (!fresh) throw new NotFoundError("Order not found");
+    // Recursive call with fresh state — one level deep only (status is now FORWARDING/PROCESSING)
+    if (["FORWARDING", "PROCESSING", "IN_PROGRESS"].includes(fresh.status)) {
+      return cancelOrder(prisma, orderId, requestingUserId, isAdmin);
+    }
+    return { status: "CANCEL_REQUESTED", refunded: false, message: `Order in ${fresh.status} — cancellation requested` };
   }
 
   // PROCESSING/IN_PROGRESS without providerOrderId
@@ -134,11 +163,17 @@ export async function cancelOrder(
       if ("error" in freshStatus || freshStatus.status === undefined) {
         console.warn(`[cancel-service] Fresh status returned error/invalid for ${orderId}:`, freshStatus);
         // statusFetchSuccess stays false — will stay CANCEL_REQUESTED
+      } else if (freshStatus.remains === undefined || freshStatus.remains === null) {
+        // Fix 8: status OK but remains missing — still unknown, do not finalize refund
+        console.warn(`[cancel-service] Fresh status has no remains for ${orderId} — staying CANCEL_REQUESTED`);
       } else {
-        freshRemains = freshStatus.remains !== undefined ? Number(freshStatus.remains) : undefined;
-        // Sanity check: NaN from bad provider data = unknown
-        if (freshRemains !== undefined && isNaN(freshRemains)) freshRemains = undefined;
-        statusFetchSuccess = true;
+        const parsed = Number(freshStatus.remains);
+        if (isNaN(parsed)) {
+          console.warn(`[cancel-service] Fresh status NaN remains for ${orderId} — staying CANCEL_REQUESTED`);
+        } else {
+          freshRemains = parsed;
+          statusFetchSuccess = true;
+        }
       }
     } catch (err) {
       console.warn(`[cancel-service] Fresh status fetch failed for ${orderId}:`, err);

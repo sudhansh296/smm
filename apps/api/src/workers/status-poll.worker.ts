@@ -19,36 +19,18 @@ const PROVIDER_STATUS_MAP: Record<string, string> = {
 const TERMINAL_STATUSES = new Set(["COMPLETED", "PARTIAL", "CANCELLED"]);
 const REFUND_ON         = new Set(["PARTIAL", "CANCELLED"]);
 
-// ── Shared refund amount calculator ───────────────────────────────────────────
-// Fix #3: clear semantics for remains values
 function calcRefundAmount(costUsd: string, quantity: number, remains: number): Decimal {
   const total = new Decimal(costUsd);
-  if (remains === 0) {
-    // Provider says nothing left to deliver = all delivered = no refund
-    return new Decimal(0);
-  }
-  if (remains >= quantity) {
-    // Provider says everything still undelivered = full refund
-    return total;
-  }
-  // Partial delivery — refund proportional to undelivered units
+  if (remains === 0)       return new Decimal(0);
+  if (remains >= quantity) return total;
   return total.times(new Decimal(remains).dividedBy(quantity)).toDecimalPlaces(8);
-}
-
-// ── Helper: load the actual fulfillment provider (Fix #2) ─────────────────────
-async function loadFulfillmentProvider(prisma: PrismaClient, order: any) {
-  const fulfillmentProviderId = order.fulfillmentProviderId ?? order.service.providerId;
-  if (fulfillmentProviderId === order.service.providerId) {
-    return order.service.provider;
-  }
-  const alt = await prisma.provider.findUnique({ where: { id: fulfillmentProviderId } });
-  return alt ?? order.service.provider; // fallback to primary if backup row gone
 }
 
 export function createStatusPollWorker(redis: Redis, prisma: PrismaClient) {
   const worker = new Worker(
     "status-poll",
     async (_job: Job) => {
+      // Include CANCEL_REQUESTED to finalize pending cancellations
       const openOrders = await prisma.order.findMany({
         where: {
           status: { in: ["PENDING", "PROCESSING", "IN_PROGRESS", "CANCEL_REQUESTED"] } as never,
@@ -59,7 +41,6 @@ export function createStatusPollWorker(redis: Redis, prisma: PrismaClient) {
 
       if (!openOrders.length) return;
 
-      // Group by FULFILLMENT provider (Fix #2 — uses actual fulfillment provider ID)
       const byProvider = new Map<string, typeof openOrders>();
       for (const order of openOrders) {
         const pid = (order as any).fulfillmentProviderId ?? order.service.providerId;
@@ -68,9 +49,8 @@ export function createStatusPollWorker(redis: Redis, prisma: PrismaClient) {
       }
 
       for (const [providerId, orders] of byProvider) {
-        // Fix #2: load by providerId — this IS the fulfillment provider for all orders in this group
         const provider = await prisma.provider.findUnique({ where: { id: providerId } });
-        if (!provider) continue; // provider row gone — skip
+        if (!provider) continue;
 
         const client = new ProviderClient(provider);
         const CHUNK = 100;
@@ -83,180 +63,139 @@ export function createStatusPollWorker(redis: Redis, prisma: PrismaClient) {
             const statuses = await client.getMultiStatus(ids);
 
             for (const order of chunk) {
-              try { // Fix: per-order error isolation — one bad order does not skip rest of batch
-              if (!data || data.error) continue;
+              // Fix 4: per-order isolation — one bad order does not abort the chunk
+              try {
+                // Fix 1: const data was missing — added here
+                const data = statuses[order.providerOrderId!] as any;
+                if (!data || data.error) continue;
 
-              const newStatus  = PROVIDER_STATUS_MAP[data.status ?? ""] ?? null;
-              // Fix: remains missing from provider = unknown, not 0
-              // 0 means "fully delivered = no refund", which is a financial decision we cannot make without confirmation
-              // Use existing DB value if provider omits remains
-              const rawRemains = data.remains !== undefined ? Number(data.remains) : null;
-              const remainsKnown = rawRemains !== null && !isNaN(rawRemains);
-              const remains    = remainsKnown ? rawRemains! : (order.remains ?? 0);
-              const startCount = (data.start_count !== null && data.start_count !== undefined)
-                ? Number(data.start_count) : order.startCount;
+                const newStatus = PROVIDER_STATUS_MAP[data.status ?? ""] ?? null;
 
-              // ── CANCEL_REQUESTED: waiting for provider to confirm ─────────
-              if ((order as any).status === "CANCEL_REQUESTED") {
-                if (!newStatus) continue;
+                // Fix 10: missing remains from provider = unknown, not 0
+                // 0 = "fully delivered = no refund" — financial decision we need confirmation for
+                const rawRemains   = data.remains !== undefined ? Number(data.remains) : null;
+                const remainsKnown = rawRemains !== null && !isNaN(rawRemains);
+                const remains      = remainsKnown ? rawRemains! : (order.remains ?? 0);
+                const startCount   = (data.start_count !== null && data.start_count !== undefined)
+                  ? Number(data.start_count) : order.startCount;
 
-                if (newStatus === "CANCELLED") {
-                  // Fix #4: use shared refund calculator — proportional by remains
-                  const refundAmount = calcRefundAmount(order.costUsd.toString(), order.quantity, remains);
+                // ── CANCEL_REQUESTED ─────────────────────────────────────────
+                if ((order as any).status === "CANCEL_REQUESTED") {
+                  if (!newStatus) continue;
 
-                  await prisma.$transaction(async (tx) => {
-                    await tx.order.update({
-                      where: { id: order.id },
-                      data: { status: "CANCELLED" as never, remains, startCount } as never,
-                    });
-                    if (refundAmount.greaterThan(0)) {
-                      // Fix #1: only catch AlreadyRefundedError — let real DB errors propagate
-                      try {
-                        await refundOrderTx(
-                          tx as Parameters<typeof refundOrderTx>[0],
-                          order.id,
-                          {
+                  if (newStatus === "CANCELLED") {
+                    // Fix 10: if remains unknown, defer — do NOT assume 0
+                    if (!remainsKnown) {
+                      console.warn(`[status-poll] Order ${order.id}: CANCELLED but remains unknown — deferring refund`);
+                      continue; // keep CANCEL_REQUESTED, try next poll
+                    }
+                    const refundAmount = calcRefundAmount(order.costUsd.toString(), order.quantity, remains);
+                    await prisma.$transaction(async (tx) => {
+                      await tx.order.update({
+                        where: { id: order.id },
+                        data: { status: "CANCELLED" as never, remains, startCount } as never,
+                      });
+                      if (refundAmount.greaterThan(0)) {
+                        try {
+                          await refundOrderTx(tx as Parameters<typeof refundOrderTx>[0], order.id, {
                             userId:      order.userId,
                             amountUsd:   refundAmount,
                             inrRate:     new Decimal(order.inrRateAtOrder.toString()),
                             description: `Refund: order #${order.id.slice(-8)} cancelled (provider confirmed)`,
-                          },
-                        );
-                      } catch (err) {
-                        if (err instanceof AlreadyRefundedError) {
-                          console.log(`[status-poll] Order ${order.id} already refunded — skipping wallet credit`);
-                        } else {
-                          throw err; // real error — let transaction rollback
+                          });
+                        } catch (err) {
+                          if (err instanceof AlreadyRefundedError) {
+                            console.log(`[status-poll] Order ${order.id} already refunded — skipping`);
+                          } else { throw err; }
                         }
                       }
-                    }
-                    await (tx as any).notification.create({
-                      data: {
+                      await (tx as any).notification.create({ data: {
                         userId:  order.userId,
                         message: `Order #${order.id.slice(-8)} cancelled. ${refundAmount.greaterThan(0) ? `$${refundAmount.toFixed(2)} refunded.` : "No refund (already delivered)."}`,
-                      },
+                      }});
                     });
-                  });
-                  console.log(`[status-poll] Order ${order.id} CANCEL_REQUESTED → CANCELLED refund=$${calcRefundAmount(order.costUsd.toString(), order.quantity, remains).toFixed(2)}`);
+                    console.log(`[status-poll] ${order.id} CANCEL_REQUESTED→CANCELLED refund=$${calcRefundAmount(order.costUsd.toString(), order.quantity, remains).toFixed(2)}`);
 
-                } else if (newStatus === "PARTIAL" && remains > 0) {
-                  const refundAmount = calcRefundAmount(order.costUsd.toString(), order.quantity, remains);
-                  await prisma.$transaction(async (tx) => {
-                    await tx.order.update({
-                      where: { id: order.id },
-                      data: { status: "PARTIAL" as never, remains, startCount } as never,
-                    });
-                    if (refundAmount.greaterThan(0)) {
-                      try {
-                        await refundOrderTx(
-                          tx as Parameters<typeof refundOrderTx>[0],
-                          order.id,
-                          {
+                  } else if (newStatus === "PARTIAL" && remainsKnown && remains > 0) {
+                    const refundAmount = calcRefundAmount(order.costUsd.toString(), order.quantity, remains);
+                    await prisma.$transaction(async (tx) => {
+                      await tx.order.update({ where: { id: order.id }, data: { status: "PARTIAL" as never, remains, startCount } as never });
+                      if (refundAmount.greaterThan(0)) {
+                        try {
+                          await refundOrderTx(tx as Parameters<typeof refundOrderTx>[0], order.id, {
                             userId:      order.userId,
                             amountUsd:   refundAmount,
                             inrRate:     new Decimal(order.inrRateAtOrder.toString()),
                             description: `Partial refund: ${remains} units undelivered (cancel was too late)`,
-                          },
-                        );
-                      } catch (err) {
-                        if (err instanceof AlreadyRefundedError) {
-                          console.log(`[status-poll] Order ${order.id} already refunded — skipping`);
-                        } else {
-                          throw err;
+                          });
+                        } catch (err) {
+                          if (err instanceof AlreadyRefundedError) {
+                            console.log(`[status-poll] Order ${order.id} already refunded — skipping`);
+                          } else { throw err; }
                         }
                       }
-                    }
-                    await (tx as any).notification.create({
-                      data: {
+                      await (tx as any).notification.create({ data: {
                         userId:  order.userId,
                         message: `Order #${order.id.slice(-8)} partially delivered before cancel. $${refundAmount.toFixed(2)} refunded.`,
-                      },
+                      }});
                     });
-                  });
-                  console.log(`[status-poll] Order ${order.id} CANCEL_REQUESTED → PARTIAL + refund=$${refundAmount.toFixed(2)}`);
 
-                } else if (newStatus === "COMPLETED") {
-                  await prisma.order.update({
-                    where: { id: order.id },
-                    data: { status: "COMPLETED" as never, remains, startCount } as never,
-                  });
-                  await (prisma as any).notification.create({
-                    data: {
+                  } else if (newStatus === "COMPLETED") {
+                    await prisma.order.update({ where: { id: order.id }, data: { status: "COMPLETED" as never, remains, startCount } as never });
+                    await (prisma as any).notification.create({ data: {
                       userId:  order.userId,
                       message: `Order #${order.id.slice(-8)} could not be cancelled — provider already completed delivery.`,
-                    },
-                  });
-                  console.log(`[status-poll] Order ${order.id} CANCEL_REQUESTED → COMPLETED (cancel too late, no refund)`);
-                }
-                continue; // always skip normal flow for CANCEL_REQUESTED
-              }
-
-              // ── Normal order status update ─────────────────────────────────
-              if (!newStatus) continue;
-              if (
-                newStatus === order.status &&
-                remains === (order.remains ?? 0) &&
-                startCount === order.startCount
-              ) continue;
-
-              if (TERMINAL_STATUSES.has(newStatus) && REFUND_ON.has(newStatus)) {
-                // If provider omitted remains — we cannot determine refund amount safely
-                // Skip financial action; next poll may have full data
-                if (!remainsKnown) {
-                  console.warn(`[status-poll] Order ${order.id}: ${newStatus} but remains unknown — deferring refund`);
-                  await prisma.order.update({
-                    where: { id: order.id },
-                    data: { status: newStatus as never, startCount } as never,
-                  });
+                    }});
+                  }
+                  // PROCESSING/IN_PROGRESS — leave as CANCEL_REQUESTED
                   continue;
                 }
-                const refundAmount = calcRefundAmount(order.costUsd.toString(), order.quantity, remains);
 
-                if (refundAmount.greaterThan(0)) {
-                  await prisma.$transaction(async (tx) => {
-                    await (tx as any).order.update({
-                      where: { id: order.id },
-                      data: { status: newStatus as never, remains, startCount } as never,
-                    });
-                    // Fix #1: typed catch — only swallow AlreadyRefundedError
-                    try {
-                      await refundOrderTx(
-                        tx as Parameters<typeof refundOrderTx>[0],
-                        order.id,
-                        {
+                // ── Normal order ─────────────────────────────────────────────
+                if (!newStatus) continue;
+                if (
+                  newStatus === order.status &&
+                  remains === (order.remains ?? 0) &&
+                  startCount === order.startCount
+                ) continue;
+
+                if (TERMINAL_STATUSES.has(newStatus) && REFUND_ON.has(newStatus)) {
+                  // Fix 10: unknown remains — leave order in current open status, retry next poll
+                  // Do NOT move to terminal state without knowing refund amount
+                  if (!remainsKnown) {
+                    console.warn(`[status-poll] Order ${order.id}: ${newStatus} but remains unknown — keeping current status for next poll`);
+                    // Update startCount only, keep current status so order remains pollable
+                    await prisma.order.update({ where: { id: order.id }, data: { startCount } as never });
+                    continue;
+                  }
+
+                  const refundAmount = calcRefundAmount(order.costUsd.toString(), order.quantity, remains);
+                  if (refundAmount.greaterThan(0)) {
+                    await prisma.$transaction(async (tx) => {
+                      await (tx as any).order.update({ where: { id: order.id }, data: { status: newStatus as never, remains, startCount } as never });
+                      try {
+                        await refundOrderTx(tx as Parameters<typeof refundOrderTx>[0], order.id, {
                           userId:      order.userId,
                           amountUsd:   refundAmount,
                           inrRate:     new Decimal(order.inrRateAtOrder.toString()),
                           description: `Refund: ${remains} units undelivered for order #${order.id}`,
-                        },
-                      );
-                    } catch (err) {
-                      if (err instanceof AlreadyRefundedError) {
-                        console.log(`[status-poll] Order ${order.id} already refunded — skipping`);
-                      } else {
-                        throw err; // real error — rollback transaction
+                        });
+                      } catch (err) {
+                        if (err instanceof AlreadyRefundedError) {
+                          console.log(`[status-poll] Order ${order.id} already refunded — skipping`);
+                        } else { throw err; }
                       }
-                    }
-                    await (tx as any).notification.create({
-                      data: {
+                      await (tx as any).notification.create({ data: {
                         userId:  order.userId,
                         message: `Order #${order.id} ${newStatus.toLowerCase()}: $${refundAmount.toFixed(2)} refunded for ${remains} undelivered units.`,
-                      },
+                      }});
                     });
-                  });
+                  } else {
+                    await prisma.order.update({ where: { id: order.id }, data: { status: newStatus as never, remains, startCount } as never });
+                  }
                 } else {
-                  // remains=0 — nothing to refund, just update status
-                  await prisma.order.update({
-                    where: { id: order.id },
-                    data: { status: newStatus as never, remains, startCount } as never,
-                  });
+                  await prisma.order.update({ where: { id: order.id }, data: { status: newStatus as never, remains, startCount } as never });
                 }
-              } else {
-                await prisma.order.update({
-                  where: { id: order.id },
-                  data: { status: newStatus as never, remains, startCount } as never,
-                });
-              }
               } catch (orderErr) {
                 console.error(`[status-poll] Error processing order ${order.id}:`, orderErr);
               }

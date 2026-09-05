@@ -1,4 +1,4 @@
-﻿import "./lib/env.js"; // Validate env first
+import "./lib/env.js"; // Validate env first
 import { PrismaClient } from "@nexussmm/db";
 import { Redis } from "ioredis";
 import { createQueues } from "@nexussmm/queue";
@@ -53,17 +53,13 @@ async function startWorkers() {
       for (const order of stuckOrders) {
         // Check if a job already exists in the queue for this order
         const existingJob = await queues.orderForward.getJob(order.id);
-        if (!existingJob) {
-          await queues.orderForward.add(
-            "forward",
-            { orderId: order.id },
-            {
-              jobId: order.id,     // deterministic â€” prevents duplicate queue entries
-              attempts: 3,
-              backoff: { type: "exponential", delay: 5000 },
-            },
-          );
-          console.log(`[worker-entrypoint] Recovered stuck PENDING order ${order.id}`);
+        // Fix: check job state — completed/failed = stale, needs re-enqueue
+        const jobState = existingJob ? await existingJob.getState() : null;
+        const shouldRequeue = !existingJob || ['completed', 'failed', 'unknown'].includes(jobState ?? '');
+        if (shouldRequeue) {
+          if (existingJob) { try { await existingJob.remove(); } catch {} }
+          await queues.orderForward.add('forward', { orderId: order.id }, { jobId: order.id, attempts: 3, backoff: { type: 'exponential', delay: 5000 } });
+          console.log([worker-entrypoint] Recovered stuck PENDING order  (prev state: ));
           recovered++;
         }
       }

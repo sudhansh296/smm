@@ -5,23 +5,24 @@ import { ValidationError } from "../../lib/errors.js";
 export default async function manualUsdtDepositRoute(fastify: FastifyInstance) {
   fastify.get("/usdt-address", { preHandler: [fastify.authenticate] }, async (_request, reply) => {
     return reply.send({
-      trc20: process.env.USDT_WALLET_TRC20 ?? "Not configured — contact admin",
-      erc20: process.env.USDT_WALLET_ERC20 ?? "Not configured — contact admin",
-      bep20: process.env.USDT_WALLET_BEP20 ?? "Not configured — contact admin",
+      trc20: process.env["USDT_WALLET_TRC20"] ?? "Not configured — contact admin",
+      erc20: process.env["USDT_WALLET_ERC20"] ?? "Not configured — contact admin",
+      bep20: process.env["USDT_WALLET_BEP20"] ?? "Not configured — contact admin",
     });
   });
 
   fastify.post("/manual-usdt", { preHandler: [fastify.authenticate] }, async (request, reply) => {
-    const { amountUsdt, txHash, network } = z.object({
+    const parsed = z.object({
       amountUsdt: z.coerce.number().min(1, "Minimum $1 USDT").max(100000),
-      txHash: z.string().min(10, "Enter valid transaction hash").max(100),
-      network: z.enum(["TRC20", "ERC20", "BEP20"]).default("TRC20"),
+      txHash:     z.string().min(10, "Enter valid transaction hash").max(100),
+      network:    z.enum(["TRC20", "ERC20", "BEP20"]).default("TRC20"),
     }).parse(request.body);
 
-    // Fix: normalize TxHash — trim whitespace, lowercase for case-insensitive dedup
-    txHash = txHash.trim().toLowerCase();
+    const amountUsdt = parsed.amountUsdt;
+    const network    = parsed.network;
+    // Fix: normalize — new const avoids const reassignment error
+    const txHash = parsed.txHash.trim().toLowerCase();
 
-    // Prevent same TxHash being submitted twice
     const existing = await fastify.prisma.depositRequest.findFirst({
       where: { txId: txHash, method: "MANUAL_USDT" } as any,
     });

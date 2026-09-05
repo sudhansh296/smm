@@ -100,10 +100,7 @@ export default async function loginRoute(fastify: FastifyInstance) {
       if (!totpValid) {
         const backupCodeId = await verifyBackupCode(fastify.prisma, user.id, totpCode);
         if (backupCodeId) {
-          await fastify.prisma.totpBackupCode.update({
-            where: { id: backupCodeId },
-            data: { usedAt: new Date() },
-          });
+          // Backup code already atomically consumed inside verifyBackupCode()
           totpValid = true;
         }
       }

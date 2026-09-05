@@ -30,6 +30,9 @@ export async function createOrder(
   });
 
   if (!service) throw new NotFoundError("Service not found");
+  // Fix: archived (soft-deleted) services/providers are not orderable
+  if ((service as any).deletedAt) throw new NotFoundError("Service not found");
+  if ((service.provider as any).deletedAt) throw new NotFoundError("Service not found");
   if (!service.isEnabled) throw new ForbiddenError("Service is currently disabled");
   if (!service.provider.isEnabled) throw new ForbiddenError("Provider is currently disabled");
 
