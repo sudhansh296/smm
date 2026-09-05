@@ -17,7 +17,7 @@ const LOCK_TTL = 900; // 15 minutes
 const MAX_ATTEMPTS = 5;
 
 const schema = z.object({
-  email: z.string().email(),
+  email: z.string().trim().toLowerCase().email(),
   password: z.string().min(1),
   totpCode: z.string().optional(),
 });

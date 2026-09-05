@@ -1,6 +1,6 @@
 import { Decimal } from "decimal.js";
 import type { PrismaClient, TransactionType } from "@nexussmm/db";
-import { InsufficientBalanceError } from "../lib/errors.js";
+import { InsufficientBalanceError, AlreadyRefundedError } from "../lib/errors.js";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -124,7 +124,8 @@ export async function refundOrderTx(
   `;
   if (!rows[0]) throw new Error(`Order ${orderId} not found`);
   if (rows[0].refundedAt !== null) {
-    throw new Error(`Order ${orderId} already refunded`);
+    // Throw typed error so callers can distinguish "already refunded" from genuine DB errors
+    throw new AlreadyRefundedError(orderId);
   }
 
   // Mark refunded on the order

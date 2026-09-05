@@ -35,7 +35,7 @@ export async function createEmailVerificationToken(
 }
 
 const schema = z.object({
-  email: z.string().email("Invalid email"),
+  email: z.string().trim().toLowerCase().email("Invalid email"),
   displayName: z.string().min(2).max(50),
   password: z.string().min(8, "Password must be at least 8 characters").max(128),
 });
@@ -54,13 +54,24 @@ export default async function registerRoute(fastify: FastifyInstance) {
     if (existing) throw new ConflictError("An account with this email already exists");
 
     const passwordHash = await hashPassword(password);
+    const rawToken = randomBytes(32).toString("hex");
+    const tokenHash = createHash("sha256").update(rawToken).digest("hex");
 
-    const user = await fastify.prisma.user.create({
-      data: { email: lowerEmail, displayName: displayName.trim(), passwordHash, walletBalance: 0 },
+    // Fix #7: user creation + verification token in ONE transaction
+    // Prevents orphaned accounts where user exists but token was never created
+    const user = await fastify.prisma.$transaction(async (tx) => {
+      const newUser = await tx.user.create({
+        data: { email: lowerEmail, displayName: displayName.trim(), passwordHash, walletBalance: 0 },
+      });
+      await tx.emailVerification.create({
+        data: {
+          userId:    newUser.id,
+          token:     tokenHash,
+          expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+        },
+      });
+      return newUser;
     });
-
-    // Fix #1: use shared helper — stores SHA-256 hash, sends raw token in email
-    const rawToken = await createEmailVerificationToken(fastify.prisma as any, user.id);
 
     sendVerificationEmail(lowerEmail, displayName, rawToken).catch((err) =>
       fastify.log.error({ err }, "Failed to send verification email"),

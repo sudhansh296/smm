@@ -2,24 +2,34 @@ import { Decimal } from "decimal.js";
 import type { PrismaClient } from "@nexussmm/db";
 import { ProviderClient } from "./provider.service.js";
 import { refundOrderTx } from "./wallet.service.js";
-import { NotFoundError, ValidationError } from "../lib/errors.js";
+import { NotFoundError, ValidationError, AlreadyRefundedError } from "../lib/errors.js";
 
-/**
- * Shared cancellation service used by user route, API-v2, admin, and workers.
- * Single implementation prevents divergent behaviour across entry points.
- *
- * Returns the resulting order status and whether a refund was issued.
- */
 export interface CancelResult {
   status: "CANCELLED" | "CANCEL_REQUESTED";
   refunded: boolean;
   message: string;
 }
 
+// Fix #2: always use the actual fulfillment provider for cancel/status calls
+async function loadFulfillmentProvider(prisma: PrismaClient, order: any) {
+  const fulfillmentProviderId = order.fulfillmentProviderId ?? order.service.providerId;
+  if (fulfillmentProviderId === order.service.providerId) return order.service.provider;
+  const alt = await prisma.provider.findUnique({ where: { id: fulfillmentProviderId } });
+  return alt ?? order.service.provider;
+}
+
+// Fix #3: clear semantics — remains=0 means fully delivered, no refund
+function calcCancelRefund(costUsd: string, quantity: number, remains: number | undefined): Decimal {
+  const total = new Decimal(costUsd);
+  if (remains === undefined || remains >= quantity) return total;        // unknown or nothing delivered
+  if (remains === 0)                                return new Decimal(0); // fully delivered
+  return total.times(new Decimal(remains).dividedBy(quantity)).toDecimalPlaces(8);
+}
+
 export async function cancelOrder(
   prisma: PrismaClient,
   orderId: string,
-  requestingUserId: string, // pass admin userId for admin cancels, user's own id for user/v2
+  requestingUserId: string,
   isAdmin = false,
 ): Promise<CancelResult> {
   const order = await prisma.order.findUnique({
@@ -28,66 +38,42 @@ export async function cancelOrder(
   }) as any;
 
   if (!order) throw new NotFoundError("Order not found");
-
-  // Ownership check — admin can cancel any order
-  if (!isAdmin && order.userId !== requestingUserId) {
-    throw new NotFoundError("Order not found");
-  }
+  if (!isAdmin && order.userId !== requestingUserId) throw new NotFoundError("Order not found");
 
   const cancelableStatuses = ["PENDING", "FORWARDING", "PROCESSING", "IN_PROGRESS", "CANCEL_REQUESTED"];
   if (!cancelableStatuses.includes(order.status)) {
     throw new ValidationError(`Order cannot be cancelled (status: ${order.status})`);
   }
-
-  // Already in cancel flow — idempotent
   if (order.status === "CANCEL_REQUESTED") {
     return { status: "CANCEL_REQUESTED", refunded: false, message: "Cancellation already in progress" };
   }
 
-  // ── Fix 1: FORWARDING must NOT immediately refund ──────────────────────────
-  // When FORWARDING, provider HTTP call may already be in flight.
-  // Treat same as PROCESSING — set CANCEL_REQUESTED and attempt provider cancel.
-  // Do NOT immediately refund — we don't know if provider has accepted.
+  // FORWARDING — provider call in flight, do not refund immediately
   if (order.status === "FORWARDING") {
-    // Mark CANCEL_REQUESTED atomically (conditional update guards against races)
     const marked = await prisma.order.updateMany({
       where: { id: orderId, status: "FORWARDING" } as never,
       data: { status: "CANCEL_REQUESTED" } as never,
     });
-
     if (marked.count === 0) {
-      // Status changed between read and update — re-read and let caller retry
       const fresh = await prisma.order.findUnique({ where: { id: orderId }, select: { status: true } }) as any;
       throw new ValidationError(`Order status changed to ${fresh?.status ?? "unknown"} — please retry`);
     }
-
-    // Try provider cancel best-effort (we may or may not have a providerOrderId yet)
     if (order.providerOrderId) {
-      const result = await attemptProviderCancel(prisma, order);
+      const provider = await loadFulfillmentProvider(prisma, order);
+      const result = await attemptProviderCancel(provider, order.providerOrderId);
       if (result === "cancelled") {
-        // No fresh status needed for FORWARDING — if we just set it, likely nothing delivered
-        await finaliseCancel(prisma, orderId, order);
+        await finaliseCancel(prisma, orderId, order, undefined);
         return { status: "CANCELLED", refunded: true, message: "Order cancelled and refunded" };
       }
     }
-
-    // No providerOrderId yet or provider cancel failed — stay CANCEL_REQUESTED
-    // The forward worker will see CANCEL_REQUESTED after provider responds
-    return {
-      status: "CANCEL_REQUESTED",
-      refunded: false,
-      message: "Cancellation requested. Refund will be issued once provider confirms.",
-    };
+    return { status: "CANCEL_REQUESTED", refunded: false, message: "Cancellation requested. Refund will be issued once provider confirms." };
   }
 
-  // ── PENDING with no providerOrderId — safe immediate cancel + refund ───────
+  // PENDING with no providerOrderId — nothing sent to provider
   if (order.status === "PENDING" && !order.providerOrderId) {
     await prisma.$transaction(async (tx) => {
-      const locked = await tx.$queryRaw<Array<{ status: string }>>`
-        SELECT status FROM orders WHERE id = ${orderId} FOR UPDATE
-      `;
+      const locked = await tx.$queryRaw<Array<{ status: string }>>`SELECT status FROM orders WHERE id = ${orderId} FOR UPDATE`;
       if (!locked[0] || locked[0].status !== "PENDING") return;
-
       await tx.order.update({ where: { id: orderId }, data: { status: "CANCELLED" } });
       await refundOrderTx(tx as Parameters<typeof refundOrderTx>[0], orderId, {
         userId: order.userId,
@@ -95,21 +81,13 @@ export async function cancelOrder(
         inrRate: new Decimal(order.inrRateAtOrder.toString()),
         description: `Refund: order #${orderId.slice(-8)} cancelled (not forwarded to provider)`,
       });
-      await tx.notification.create({
-        data: {
-          userId: order.userId,
-          message: `Order #${orderId.slice(-8)} cancelled. $${new Decimal(order.costUsd.toString()).toFixed(2)} refunded.`,
-        },
-      });
+      await tx.notification.create({ data: { userId: order.userId, message: `Order #${orderId.slice(-8)} cancelled. $${new Decimal(order.costUsd.toString()).toFixed(2)} refunded.` } });
     });
     return { status: "CANCELLED", refunded: true, message: "Order cancelled and refunded" };
   }
 
-  // ── PROCESSING / IN_PROGRESS (or PENDING with providerOrderId) ──────────────
-  // Provider has the order — must attempt cancellation before refunding
-
+  // PROCESSING/IN_PROGRESS without providerOrderId
   if (!order.providerOrderId) {
-    // Has PROCESSING status but no providerOrderId — unusual, safe to refund
     await prisma.$transaction(async (tx) => {
       await tx.order.update({ where: { id: orderId }, data: { status: "CANCELLED" } });
       await refundOrderTx(tx as Parameters<typeof refundOrderTx>[0], orderId, {
@@ -118,14 +96,14 @@ export async function cancelOrder(
         inrRate: new Decimal(order.inrRateAtOrder.toString()),
         description: `Refund: order #${orderId.slice(-8)} cancelled`,
       });
-      await tx.notification.create({
-        data: {
-          userId: order.userId,
-          message: `Order #${orderId.slice(-8)} cancelled. $${new Decimal(order.costUsd.toString()).toFixed(2)} refunded.`,
-        },
-      });
+      await tx.notification.create({ data: { userId: order.userId, message: `Order #${orderId.slice(-8)} cancelled. $${new Decimal(order.costUsd.toString()).toFixed(2)} refunded.` } });
     });
     return { status: "CANCELLED", refunded: true, message: "Order cancelled and refunded" };
+  }
+
+  // Fix #5: if service doesn't support cancel, reject when provider has the order
+  if (!order.service.supportsCancel) {
+    throw new ValidationError("This service does not support cancellation. The order will continue processing.");
   }
 
   // Mark CANCEL_REQUESTED atomically
@@ -138,63 +116,38 @@ export async function cancelOrder(
     throw new ValidationError(`Order status changed to ${fresh?.status ?? "unknown"} — please retry`);
   }
 
-  // Fix 2: check provider cancel response — {error:...} does NOT throw
-  // Fix #3: get fresh provider remains so finaliseCancel can do proportional refund
-  const providerResult = await attemptProviderCancel(prisma, order);
+  // Fix #2: use actual fulfillment provider for cancel
+  const provider = await loadFulfillmentProvider(prisma, order);
+  const providerResult = await attemptProviderCancel(provider, order.providerOrderId);
+
   if (providerResult === "cancelled") {
-    // Fetch fresh status to know how many units were delivered before cancellation
+    // Fix #2: use fulfillment provider for fresh status
     let freshRemains: number | undefined;
     try {
-      const client = new (await import("./provider.service.js")).ProviderClient(order.service.provider);
+      const client = new ProviderClient(provider);
       const freshStatus = await client.getStatus(order.providerOrderId);
-      freshRemains = freshStatus.remains ?? undefined;
-    } catch { /* ignore — use undefined = full refund */ }
+      freshRemains = freshStatus.remains !== undefined ? Number(freshStatus.remains) : undefined;
+    } catch { /* network error — full refund as safe default */ }
     await finaliseCancel(prisma, orderId, order, freshRemains);
     return { status: "CANCELLED", refunded: true, message: "Order cancelled and refunded" };
   }
 
-  // Provider cancel failed or returned error — stay CANCEL_REQUESTED
-  // Status-poll worker will pick this up when provider eventually cancels
-  return {
-    status: "CANCEL_REQUESTED",
-    refunded: false,
-    message: "Cancellation requested. Refund will be issued once provider confirms.",
-  };
+  return { status: "CANCEL_REQUESTED", refunded: false, message: "Cancellation requested. Refund will be issued once provider confirms." };
 }
 
-// ── Helpers ──────────────────────────────────────────────────────────────────
-
-async function attemptProviderCancel(prisma: PrismaClient, order: any): Promise<"cancelled" | "failed"> {
-  if (!order.providerOrderId) return "failed";
-
-  const providerId = order.fulfillmentProviderId ?? order.service.providerId;
-  let provider = order.service.provider;
-
-  if (providerId !== order.service.providerId) {
-    const alt = await prisma.provider.findUnique({ where: { id: providerId } });
-    if (alt) provider = alt;
-  }
-
+async function attemptProviderCancel(provider: any, providerOrderId: string): Promise<"cancelled" | "failed"> {
   try {
     const client = new ProviderClient(provider);
-    const result = await client.cancelOrder(order.providerOrderId);
-
-    // Fix 2: check for {error:...} — does NOT throw, must be explicitly checked
+    const result = await client.cancelOrder(providerOrderId);
     if ("error" in result) {
-      console.warn(`[cancel-service] Provider cancel returned error for order ${order.id}: ${result.error}`);
+      console.warn(`[cancel-service] Provider cancel error: ${result.error}`);
       return "failed";
     }
-
-    // Standard SMM API returns { cancel: 1 } on success
-    if ("cancel" in result && result.cancel === 1) {
-      return "cancelled";
-    }
-
-    // Unknown response shape — treat as failure to be safe
-    console.warn(`[cancel-service] Unexpected provider cancel response for order ${order.id}:`, result);
+    if ("cancel" in result && result.cancel === 1) return "cancelled";
+    console.warn("[cancel-service] Unexpected provider cancel response:", result);
     return "failed";
   } catch (err) {
-    console.warn(`[cancel-service] Provider cancel threw for order ${order.id}:`, err);
+    console.warn("[cancel-service] Provider cancel threw:", err);
     return "failed";
   }
 }
@@ -203,30 +156,33 @@ async function finaliseCancel(
   prisma: PrismaClient,
   orderId: string,
   order: any,
-  remains?: number,  // if known, refund only undelivered portion
+  remains: number | undefined,
 ): Promise<void> {
-  // Fix #8: if provider reports remaining units, only refund undelivered portion
-  // This prevents over-refunding when provider partially delivered before cancel
-  let refundAmount: Decimal;
-  if (remains !== undefined && remains > 0 && remains < order.quantity) {
-    const ratio = new Decimal(remains).dividedBy(order.quantity);
-    refundAmount = new Decimal(order.costUsd.toString()).times(ratio).toDecimalPlaces(8);
-  } else {
-    refundAmount = new Decimal(order.costUsd.toString());
-  }
+  const refundAmount = calcCancelRefund(order.costUsd.toString(), order.quantity, remains);
 
   await prisma.$transaction(async (tx) => {
     await tx.order.update({ where: { id: orderId }, data: { status: "CANCELLED" } });
-    await refundOrderTx(tx as Parameters<typeof refundOrderTx>[0], orderId, {
-      userId: order.userId,
-      amountUsd: refundAmount,
-      inrRate: new Decimal(order.inrRateAtOrder.toString()),
-      description: `Refund: order #${orderId.slice(-8)} cancelled (provider confirmed)`,
-    });
+    if (refundAmount.greaterThan(0)) {
+      // Fix #1: only catch AlreadyRefundedError — real errors propagate and rollback transaction
+      try {
+        await refundOrderTx(tx as Parameters<typeof refundOrderTx>[0], orderId, {
+          userId: order.userId,
+          amountUsd: refundAmount,
+          inrRate: new Decimal(order.inrRateAtOrder.toString()),
+          description: `Refund: order #${orderId.slice(-8)} cancelled (provider confirmed)`,
+        });
+      } catch (err) {
+        if (err instanceof AlreadyRefundedError) {
+          console.log(`[cancel-service] Order ${orderId} already refunded — skipping`);
+        } else {
+          throw err; // DB error, Prisma error, etc. — rollback
+        }
+      }
+    }
     await tx.notification.create({
       data: {
         userId: order.userId,
-        message: `Order #${orderId.slice(-8)} cancelled. $${refundAmount.toFixed(2)} refunded.`,
+        message: `Order #${orderId.slice(-8)} cancelled. ${refundAmount.greaterThan(0) ? `$${refundAmount.toFixed(2)} refunded.` : "No refund (fully delivered before cancel)."}`,
       },
     });
   });

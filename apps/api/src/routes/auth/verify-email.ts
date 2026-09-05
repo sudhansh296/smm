@@ -45,7 +45,7 @@ export default async function verifyEmailRoute(fastify: FastifyInstance) {
 
   // Fix #1: resend uses same shared helper as registration
   fastify.post("/resend-verification", async (request, reply) => {
-    const { email } = z.object({ email: z.string().email() }).parse(request.body);
+    const { email } = z.object({ email: z.string().trim().toLowerCase().email() }).parse(request.body);
 
     const user = await fastify.prisma.user.findUnique({ where: { email: email.trim().toLowerCase() } });
 

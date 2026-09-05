@@ -113,7 +113,8 @@ export default async function adminProvidersRoute(fastify: FastifyInstance) {
               minQuantity: Number(ps.min),
               maxQuantity: Number(ps.max),
               supportsRefill: ps.refill ?? false,
-              supportsCancel: (ps as any).cancel ?? true,
+              // Fix #4: preserve existing supportsCancel if provider doesn't send the field
+              supportsCancel: (ps as any).cancel !== undefined ? Boolean((ps as any).cancel) : existing.supportsCancel,
               // markupOverride intentionally NOT touched — preserved as-is
             },
           });
@@ -137,7 +138,8 @@ export default async function adminProvidersRoute(fastify: FastifyInstance) {
               minQuantity: Number(ps.min),
               maxQuantity: Number(ps.max),
               supportsRefill: ps.refill ?? false,
-              supportsCancel: (ps as any).cancel ?? true,
+              // Fix #4: default false for new services — safer than assuming cancel works
+              supportsCancel: (ps as any).cancel !== undefined ? Boolean((ps as any).cancel) : false,
               isEnabled: true,
             },
           });
