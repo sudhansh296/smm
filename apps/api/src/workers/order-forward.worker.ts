@@ -94,17 +94,35 @@ export function createOrderForwardWorker(redis: Redis, prisma: PrismaClient) {
         );
 
         if (!("error" in result)) {
-          await prisma.order.update({
-            where: { id: orderId },
+          // Try to update — but order may now be CANCEL_REQUESTED (user cancelled while we were calling provider)
+          const updated = await prisma.order.updateMany({
+            where: { id: orderId, status: { in: ["FORWARDING"] } } as never,
             data: {
               status: "PROCESSING",
               providerOrderId: result.order.toString(),
               fulfillmentProviderId: order.service.providerId,
             } as never,
           });
-          // Lock can be deleted — we have providerOrderId now
+
+          if (updated.count === 0) {
+            // Order was set to CANCEL_REQUESTED while provider was processing it
+            // Save providerOrderId so status-poll can track and finalize cancellation
+            await prisma.order.update({
+              where: { id: orderId },
+              data: {
+                providerOrderId: result.order.toString(),
+                fulfillmentProviderId: order.service.providerId,
+              } as never,
+            });
+            console.warn(
+              `[order-forward] Order ${orderId} was CANCEL_REQUESTED while provider accepted it. ` +
+              `providerOrderId=${result.order} saved. Status-poll will finalize cancellation.`
+            );
+          } else {
+            console.log(`[order-forward] Order ${orderId} forwarded via PRIMARY → ${result.order}`);
+          }
+
           await redis.del(lockKey);
-          console.log(`[order-forward] Order ${orderId} forwarded via PRIMARY → ${result.order}`);
           return;
         }
 

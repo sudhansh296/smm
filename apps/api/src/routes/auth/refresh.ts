@@ -14,17 +14,35 @@ export default async function refreshRoute(fastify: FastifyInstance) {
       include: { user: { select: { id: true, isAdmin: true, isSuspended: true } } },
     });
 
-    // Token was already revoked AND a replacement token was issued → reuse detected
-    // This is a genuine security event (stolen token replayed after rotation)
+    // Fix 10: distinguish genuine token reuse from multi-tab concurrent refresh race
+    // Genuine reuse: token was revoked AND a replacement was successfully created
+    // Race case: token was revoked but we're still in the window before replacement is visible
     if (stored && stored.revokedAt) {
-      fastify.log.warn({ userId: stored.userId }, "Refresh token reuse after rotation — revoking all sessions");
-      await fastify.prisma.refreshToken.updateMany({
-        where: { userId: stored.userId, revokedAt: null },
-        data: { revokedAt: new Date() },
+      // Check if a replacement token was issued for this user AFTER this token was revoked
+      const replacementExists = await fastify.prisma.refreshToken.findFirst({
+        where: {
+          userId: stored.userId,
+          revokedAt: null,
+          createdAt: { gt: stored.revokedAt },
+        },
       });
-      reply.clearCookie("refreshToken", { path: "/" });
-      reply.clearCookie("accessToken", { path: "/" });
-      throw new UnauthorizedError("Session invalidated. Please log in again.");
+
+      if (replacementExists) {
+        // Genuine reuse: revoked token used AFTER rotation completed → security event
+        fastify.log.warn({ userId: stored.userId }, "Refresh token reuse detected — revoking all sessions");
+        await fastify.prisma.refreshToken.updateMany({
+          where: { userId: stored.userId, revokedAt: null },
+          data: { revokedAt: new Date() },
+        });
+        reply.clearCookie("refreshToken", { path: "/" });
+        reply.clearCookie("accessToken", { path: "/" });
+        throw new UnauthorizedError("Session invalidated due to suspicious activity. Please log in again.");
+      } else {
+        // Race case: token revoked very recently, replacement not yet visible
+        // Return 401 so client retries — the winning concurrent request will set new cookie
+        fastify.log.debug({ userId: stored.userId }, "Refresh race: token revoked but no replacement yet, returning 401 for retry");
+        throw new UnauthorizedError("Token rotated by concurrent request — please retry");
+      }
     }
 
     if (!stored || stored.expiresAt < new Date()) {

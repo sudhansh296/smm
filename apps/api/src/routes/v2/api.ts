@@ -3,8 +3,7 @@ import { createHash } from "crypto";
 import { Decimal } from "decimal.js";
 import { z } from "zod";
 import { createOrder } from "../../services/order.service.js";
-import { refundOrderTx } from "../../services/wallet.service.js";
-import { ProviderClient } from "../../services/provider.service.js";
+import { cancelOrder } from "../../services/cancel.service.js";
 
 const API_V2_RATE_LIMIT_MAX = 60;
 const API_V2_RATE_WINDOW = 60_000;
@@ -32,7 +31,9 @@ const V2_STATUS_MAP: Record<string, string> = {
   COMPLETED:   "Completed",
   PARTIAL:     "Partial",
   CANCELLED:   "Canceled",
-  REFUNDED:    "Canceled", // refunded orders appear as Canceled to API clients
+  REFUNDED:         "Canceled",
+  FORWARDING:       "Pending",
+  CANCEL_REQUESTED: "Partial",
 };
 
 function toV2Status(internalStatus: string): string {

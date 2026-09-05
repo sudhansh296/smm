@@ -4,6 +4,7 @@ import { Decimal } from "decimal.js";
 import { ProviderClient } from "../../services/provider.service.js";
 import { NotFoundError, ValidationError } from "../../lib/errors.js";
 import { refundOrderTx } from "../../services/wallet.service.js";
+import { cancelOrder } from "../../services/cancel.service.js";
 
 export default async function adminOrdersRoute(fastify: FastifyInstance) {
   // List all orders
@@ -65,18 +66,13 @@ export default async function adminOrdersRoute(fastify: FastifyInstance) {
     async (request, reply) => {
       const { id } = z.object({ id: z.string() }).parse(request.params);
       const { status } = z.object({
-        status: z.enum(["PENDING","PROCESSING","IN_PROGRESS","COMPLETED","PARTIAL","CANCELLED","REFUNDED"]),
+        // Fix 7: CANCELLED and REFUNDED are BLOCKED from generic status patch
+        // They require wallet changes — use dedicated /cancel and /refund endpoints
+        status: z.enum(["PENDING","FORWARDING","PROCESSING","IN_PROGRESS","COMPLETED","PARTIAL","CANCEL_REQUESTED"]),
       }).parse(request.body);
 
-      // Warn: setting CANCELLED/REFUNDED via status patch does NOT refund wallet
-      // Use POST /admin/orders/:id/refund for wallet-crediting refunds
       await fastify.prisma.order.update({ where: { id }, data: { status } });
-      return reply.send({
-        message: "Status updated",
-        note: ["CANCELLED","REFUNDED"].includes(status)
-          ? "Status changed without wallet credit. Use /refund endpoint if wallet credit is needed."
-          : undefined,
-      });
+      return reply.send({ message: "Status updated" });
     },
   );
 
@@ -165,17 +161,30 @@ export default async function adminOrdersRoute(fastify: FastifyInstance) {
       }
 
       const client = new ProviderClient(provider);
-      const status = await client.getStatus(order.providerOrderId);
+      const providerStatus = await client.getStatus(order.providerOrderId);
+
+      // Fix 8: sync actual order status too, not just startCount/remains
+      const PROVIDER_STATUS_MAP: Record<string, string> = {
+        Pending: "PENDING", Processing: "PROCESSING", "In progress": "IN_PROGRESS",
+        Completed: "COMPLETED", Partial: "PARTIAL", Cancelled: "CANCELLED", Canceled: "CANCELLED",
+      };
+      const mappedStatus = providerStatus.status ? PROVIDER_STATUS_MAP[providerStatus.status] ?? null : null;
 
       await fastify.prisma.order.update({
         where: { id },
         data: {
-          startCount: status.start_count ?? order.startCount,
-          remains: status.remains ?? order.remains,
+          startCount: providerStatus.start_count ?? order.startCount,
+          remains: providerStatus.remains ?? order.remains,
+          ...(mappedStatus && mappedStatus !== order.status && { status: mappedStatus as never }),
         },
       });
 
-      return reply.send({ status, message: "Status synced", provider: provider.name });
+      return reply.send({
+        providerStatus,
+        localStatusUpdated: mappedStatus && mappedStatus !== order.status ? mappedStatus : null,
+        message: "Status synced",
+        provider: provider.name,
+      });
     },
   );
 }

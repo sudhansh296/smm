@@ -126,16 +126,28 @@ export default async function adminDepositsRoute(fastify: FastifyInstance) {
     return reply.send({ message: `Approved. $${approvedAmount} credited to ${approvedEmail}`, amountUsd: approvedAmount });
   });
 
+  // Fix 9: reject uses conditional update to prevent approve+reject race
   fastify.post("/deposits/:id/reject", { preHandler: [fastify.authenticateAdmin] }, async (request, reply) => {
     const { id } = z.object({ id: z.string() }).parse(request.params);
     const { reason } = z.object({ reason: z.string().min(1, "Reason required") }).parse(request.body);
 
     const deposit = await fastify.prisma.depositRequest.findUnique({ where: { id } }) as any;
     if (!deposit) throw new NotFoundError("Deposit not found");
-    if (deposit.status !== "PENDING") throw new ValidationError("Only pending deposits can be rejected");
 
-    await fastify.prisma.depositRequest.update({ where: { id }, data: { status: "FAILED", adminNote: reason } as any });
-    await fastify.prisma.notification.create({ data: { userId: deposit.userId, message: `Your deposit request was rejected. Reason: ${reason}` } });
+    // Atomic conditional update — only succeeds if still PENDING
+    // Prevents approve+reject race where both could run simultaneously
+    const updated = await fastify.prisma.depositRequest.updateMany({
+      where: { id, status: "PENDING" } as any,
+      data: { status: "FAILED", adminNote: reason } as any,
+    });
+
+    if (updated.count === 0) {
+      throw new ValidationError(`Cannot reject deposit — current status is not PENDING`);
+    }
+
+    await fastify.prisma.notification.create({
+      data: { userId: deposit.userId, message: `Your deposit request was rejected. Reason: ${reason}` },
+    });
 
     return reply.send({ message: "Deposit rejected" });
   });
