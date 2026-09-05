@@ -130,8 +130,16 @@ export async function cancelOrder(
     try {
       const client = new ProviderClient(provider);
       const freshStatus = await client.getStatus(order.providerOrderId);
-      freshRemains = freshStatus.remains !== undefined ? Number(freshStatus.remains) : undefined;
-      statusFetchSuccess = true;
+      // Fix: treat {error:...} response as unknown — do NOT use as confirmed data
+      if ("error" in freshStatus || freshStatus.status === undefined) {
+        console.warn(`[cancel-service] Fresh status returned error/invalid for ${orderId}:`, freshStatus);
+        // statusFetchSuccess stays false — will stay CANCEL_REQUESTED
+      } else {
+        freshRemains = freshStatus.remains !== undefined ? Number(freshStatus.remains) : undefined;
+        // Sanity check: NaN from bad provider data = unknown
+        if (freshRemains !== undefined && isNaN(freshRemains)) freshRemains = undefined;
+        statusFetchSuccess = true;
+      }
     } catch (err) {
       console.warn(`[cancel-service] Fresh status fetch failed for ${orderId}:`, err);
     }

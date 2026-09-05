@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { Decimal } from "decimal.js";
-import { NotFoundError } from "../../lib/errors.js";
+import { NotFoundError, ValidationError } from "../../lib/errors.js";
 
 export default async function adminServicesRoute(fastify: FastifyInstance) {
   // List all services — exclude soft-deleted
@@ -40,6 +40,7 @@ export default async function adminServicesRoute(fastify: FastifyInstance) {
         maxQuantity: s.maxQuantity,
         isEnabled: s.isEnabled,
         supportsRefill: s.supportsRefill,
+        supportsCancel: s.supportsCancel ?? true,
         displayOrder: s.displayOrder,
         backupProviderId: s.backupProviderId ?? null,
         backupProviderServiceId: s.backupProviderServiceId ?? null,
@@ -63,6 +64,7 @@ export default async function adminServicesRoute(fastify: FastifyInstance) {
           maxQuantity: z.coerce.number().int().positive().optional(),
           isEnabled: z.boolean().optional(),
           supportsRefill: z.boolean().optional(),
+          supportsCancel: z.boolean().optional(),
           markupOverride: z.coerce.number().min(0).max(500).nullable().optional(),
           manualSellingPriceUsd: z.coerce.number().positive().nullable().optional(),
           backupProviderId: z.string().nullable().optional(),
@@ -101,6 +103,7 @@ export default async function adminServicesRoute(fastify: FastifyInstance) {
           ...(data.maxQuantity !== undefined && { maxQuantity: data.maxQuantity }),
           ...(data.isEnabled !== undefined && { isEnabled: data.isEnabled }),
           ...(data.supportsRefill !== undefined && { supportsRefill: data.supportsRefill }),
+          ...(data.supportsCancel !== undefined && { supportsCancel: data.supportsCancel }),
           ...(data.markupOverride !== undefined && data.markupOverride !== null && { markupOverride: data.markupOverride }),
           ...(data.markupOverride === null && { markupOverride: null }),
           ...(sellingPriceUsd !== undefined && { sellingPriceUsd }),
@@ -120,11 +123,15 @@ export default async function adminServicesRoute(fastify: FastifyInstance) {
     async (request, reply) => {
       const { id } = z.object({ id: z.string() }).parse(request.params);
       const { isEnabled } = z.object({ isEnabled: z.boolean() }).parse(request.body);
-      const service = await fastify.prisma.service.update({
+      // Fix: archived (soft-deleted) services cannot be re-enabled via toggle
+      const service = await fastify.prisma.service.findUnique({ where: { id } }) as any;
+      if (!service) throw new NotFoundError("Service not found");
+      if (service.deletedAt) throw new ValidationError("Cannot toggle an archived service. Restore it first.");
+      const updated = await fastify.prisma.service.update({
         where: { id },
         data: { isEnabled },
       });
-      return reply.send({ id: service.id, isEnabled: service.isEnabled });
+      return reply.send({ id: updated.id, isEnabled: updated.isEnabled });
     },
   );
 

@@ -18,6 +18,9 @@ export default async function manualUsdtDepositRoute(fastify: FastifyInstance) {
       network: z.enum(["TRC20", "ERC20", "BEP20"]).default("TRC20"),
     }).parse(request.body);
 
+    // Fix: normalize TxHash — trim whitespace, lowercase for case-insensitive dedup
+    txHash = txHash.trim().toLowerCase();
+
     // Prevent same TxHash being submitted twice
     const existing = await fastify.prisma.depositRequest.findFirst({
       where: { txId: txHash, method: "MANUAL_USDT" } as any,

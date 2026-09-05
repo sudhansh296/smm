@@ -22,12 +22,12 @@ const envSchema = z.object({
   COOKIE_SECRET: z.string().min(32),
 
   // TOTP encryption
-  TOTP_ENCRYPTION_KEY: z.string().length(64), // 32-byte hex = 64 chars
+  TOTP_ENCRYPTION_KEY: z.string().length(64).regex(/^[0-9a-fA-F]{64}$/, "Must be 64 hex characters (32 bytes)"), // 32-byte hex
 
-  // Google OAuth
-  GOOGLE_CLIENT_ID: z.string().min(1),
-  GOOGLE_CLIENT_SECRET: z.string().min(1),
-  GOOGLE_CALLBACK_URL: z.string().url(),
+  // Google OAuth (optional — feature not yet implemented)
+  GOOGLE_CLIENT_ID: z.string().min(1).optional(),
+  GOOGLE_CLIENT_SECRET: z.string().min(1).optional(),
+  GOOGLE_CALLBACK_URL: z.string().url().optional(),
 
   // Email (SMTP)
   SMTP_HOST: z.string().min(1),

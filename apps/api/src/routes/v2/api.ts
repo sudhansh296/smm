@@ -28,7 +28,7 @@ const V2_STATUS_MAP: Record<string, string> = {
   IN_PROGRESS:      "In progress",
   COMPLETED:        "Completed",
   PARTIAL:          "Partial",
-  CANCEL_REQUESTED: "Partial",
+  CANCEL_REQUESTED: "Processing", // Cancellation in progress — show as Processing to API clients
   CANCELLED:        "Canceled",
   REFUNDED:         "Canceled",
 };
@@ -83,7 +83,10 @@ export default async function apiV2Route(fastify: FastifyInstance) {
       case "add": {
         const serviceId = params["service"];
         const link = params["link"];
-        const quantity = parseInt(params["quantity"] ?? "0", 10);
+        // Fix: strict integer parsing — parseInt("10abc") would return 10, use coerce+int instead
+        const rawQty = params["quantity"];
+        const qtyParsed = z.coerce.number().int().positive().safeParse(rawQty);
+        const quantity = qtyParsed.success ? qtyParsed.data : 0;
 
         if (!serviceId || !link || !quantity) {
           return reply.status(400).send({ error: "Missing required parameters: service, link, quantity" });

@@ -8,7 +8,14 @@ import { env } from "../../lib/env.js";
 import { Decimal } from "decimal.js";
 
 export default async function razorpayDepositRoute(fastify: FastifyInstance) {
-    const isMock = !env.RAZORPAY_KEY_ID || env.RAZORPAY_KEY_ID === "mock" || env.RAZORPAY_KEY_ID.startsWith("rzp_test_xxx");
+    const isProduction = process.env["NODE_ENV"] === "production";
+    const isMock = !isProduction && (!env.RAZORPAY_KEY_ID || env.RAZORPAY_KEY_ID === "mock" || env.RAZORPAY_KEY_ID.startsWith("rzp_test_xxx"));
+
+    // Block mock mode in production — payment security requirement
+    if (isProduction && (!env.RAZORPAY_KEY_ID || env.RAZORPAY_KEY_ID === "mock" || env.RAZORPAY_KEY_ID.startsWith("rzp_test_xxx"))) {
+      fastify.log.error("Razorpay mock credentials detected in production — refusing to serve payment endpoints");
+      throw new Error("Payment gateway not configured for production");
+    }
   // Only import Razorpay SDK when real keys are present
   let razorpay: any = null;
   if (!isMock) {

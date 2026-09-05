@@ -12,6 +12,9 @@ export default async function manualInrDepositRoute(fastify: FastifyInstance) {
       note: z.string().max(200).optional(),
     }).parse(request.body);
 
+    // Fix: normalize UTR — trim whitespace, uppercase for case-insensitive dedup
+    utrNumber = utrNumber.trim().toUpperCase();
+
     // Prevent same UTR being submitted twice — catches accidental double-submission
     const existing = await fastify.prisma.depositRequest.findFirst({
       where: { txId: utrNumber, method: "MANUAL_INR" } as any,

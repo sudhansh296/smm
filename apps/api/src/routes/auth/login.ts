@@ -66,6 +66,13 @@ export default async function loginRoute(fastify: FastifyInstance) {
 
     if (user.isSuspended) throw new ForbiddenError("Account is suspended");
 
+    // Fix: also check DB lockedUntil — Redis lock only survives Redis uptime
+    // DB lock survives Redis restart/flush
+    if (user.lockedUntil && user.lockedUntil > new Date()) {
+      const minutesLeft = Math.ceil((user.lockedUntil.getTime() - Date.now()) / 60_000);
+      throw new UnauthorizedError(`Account temporarily locked. Try again in ${minutesLeft} minute(s).`);
+    }
+
     // Verify password
     const valid = await verifyPassword(password, user.passwordHash);
     if (!valid) {

@@ -23,7 +23,8 @@ export default async function cryptomusDepositRoute(fastify: FastifyInstance) {
         currency: "USDT",
         order_id: orderId,
         network: "TRON", // TRC20 USDT — lowest fees
-        url_callback: `${env.FRONTEND_URL.replace("3000", "3001")}/webhooks/cryptomus`,
+        // Fix: use API_BASE_URL for webhook callback — not frontend URL with port substitution
+        url_callback: `${process.env["API_BASE_URL"] ?? env.FRONTEND_URL.replace("3000", "3001")}/webhooks/cryptomus`,
         is_payment_multiple: false,
         lifetime: 3600, // 1 hour
       };

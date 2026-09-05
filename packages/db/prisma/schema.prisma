@@ -177,7 +177,7 @@ model Service {
   maxQuantity       Int
   isEnabled         Boolean  @default(true)
   supportsRefill    Boolean  @default(false)
-  supportsCancel    Boolean  @default(true)
+  supportsCancel    Boolean  @default(false)
   displayOrder      Int      @default(0)
   backupProviderId        String?
   backupProviderServiceId String?

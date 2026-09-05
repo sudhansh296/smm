@@ -83,11 +83,16 @@ export function createStatusPollWorker(redis: Redis, prisma: PrismaClient) {
             const statuses = await client.getMultiStatus(ids);
 
             for (const order of chunk) {
-              const data = statuses[order.providerOrderId!] as any;
+              try { // Fix: per-order error isolation — one bad order does not skip rest of batch
               if (!data || data.error) continue;
 
               const newStatus  = PROVIDER_STATUS_MAP[data.status ?? ""] ?? null;
-              const remains    = data.remains !== undefined ? Number(data.remains) : (order.remains ?? 0);
+              // Fix: remains missing from provider = unknown, not 0
+              // 0 means "fully delivered = no refund", which is a financial decision we cannot make without confirmation
+              // Use existing DB value if provider omits remains
+              const rawRemains = data.remains !== undefined ? Number(data.remains) : null;
+              const remainsKnown = rawRemains !== null && !isNaN(rawRemains);
+              const remains    = remainsKnown ? rawRemains! : (order.remains ?? 0);
               const startCount = (data.start_count !== null && data.start_count !== undefined)
                 ? Number(data.start_count) : order.startCount;
 
@@ -195,7 +200,16 @@ export function createStatusPollWorker(redis: Redis, prisma: PrismaClient) {
               ) continue;
 
               if (TERMINAL_STATUSES.has(newStatus) && REFUND_ON.has(newStatus)) {
-                // Fix #3: use shared calculator — remains=0 means no refund
+                // If provider omitted remains — we cannot determine refund amount safely
+                // Skip financial action; next poll may have full data
+                if (!remainsKnown) {
+                  console.warn(`[status-poll] Order ${order.id}: ${newStatus} but remains unknown — deferring refund`);
+                  await prisma.order.update({
+                    where: { id: order.id },
+                    data: { status: newStatus as never, startCount } as never,
+                  });
+                  continue;
+                }
                 const refundAmount = calcRefundAmount(order.costUsd.toString(), order.quantity, remains);
 
                 if (refundAmount.greaterThan(0)) {
@@ -242,6 +256,9 @@ export function createStatusPollWorker(redis: Redis, prisma: PrismaClient) {
                   where: { id: order.id },
                   data: { status: newStatus as never, remains, startCount } as never,
                 });
+              }
+              } catch (orderErr) {
+                console.error(`[status-poll] Error processing order ${order.id}:`, orderErr);
               }
             }
           } catch (err) {
