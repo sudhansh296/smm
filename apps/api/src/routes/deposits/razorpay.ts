@@ -97,6 +97,11 @@ export default async function razorpayDepositRoute(fastify: FastifyInstance) {
     const amountUsd = new Decimal((deposit as any).amountInr).dividedBy(snapshotRate).toDecimalPlaces(8);
 
     await fastify.prisma.$transaction(async (tx) => {
+      // Fix 8: lock the deposit row first — prevents concurrent verify requests double-crediting
+      const locked = await tx.$queryRaw<Array<{ status: string }>>`
+        SELECT status FROM deposit_requests WHERE id = ${deposit.id} FOR UPDATE
+      `;
+      if (!locked[0] || locked[0].status === "COMPLETED") return; // already processed
       await tx.depositRequest.update({
         where: { id: deposit.id },
         data: { status: "COMPLETED", gatewayPaymentId: razorpay_payment_id } as any,

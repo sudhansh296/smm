@@ -62,7 +62,7 @@ export default async function apiV2Route(fastify: FastifyInstance) {
     switch (action) {
       case "services": {
         const services = await fastify.prisma.service.findMany({
-          where: { isEnabled: true, deletedAt: null } as never,
+          where: { isEnabled: true, deletedAt: null, provider: { isEnabled: true, deletedAt: null } } as never,
           include: { category: { select: { name: true } } },
           orderBy: { displayOrder: "asc" },
         });
@@ -104,6 +104,20 @@ export default async function apiV2Route(fastify: FastifyInstance) {
       }
 
       case "status": {
+        // Fix 13: support both single (order=) and multi (orders=) in same action
+        if (params["orders"]) {
+          // Multi-status via action=status&orders=id1,id2 (compatibility with SMM panels)
+          const orderIds = params["orders"].split(",").slice(0, 100);
+          const orders = await fastify.prisma.order.findMany({ where: { id: { in: orderIds }, userId: user.id } });
+          const result: Record<string, object> = {};
+          for (const id of orderIds) {
+            const o = orders.find((x: { id: string }) => x.id === id);
+            result[id] = o
+              ? { charge: new Decimal(o.costUsd.toString()).toFixed(8), start_count: o.startCount ?? 0, status: toV2Status(o.status), remains: o.remains ?? 0, currency: "USD" }
+              : { error: "Incorrect order ID" };
+          }
+          return reply.send(result);
+        }
         const orderId = params["order"];
         if (!orderId) return reply.status(400).send({ error: "Missing order parameter" });
         const order = await fastify.prisma.order.findFirst({ where: { id: orderId, userId: user.id } });
@@ -174,11 +188,17 @@ export default async function apiV2Route(fastify: FastifyInstance) {
         if (!orderId) return reply.status(400).send({ error: "Missing refill parameter" });
         const order = await fastify.prisma.order.findFirst({ where: { id: orderId, userId: user.id } });
         if (!order) return reply.status(404).send({ error: "Refill not found" });
-        // Fix #2: null means refill was never requested — not "Completed"
         if (!order.refillStatus) {
           return reply.status(404).send({ error: "Refill not found" });
         }
-        return reply.send({ status: order.refillStatus });
+        // Fix 12: map internal values to SMM API-standard vocabulary
+        const REFILL_STATUS_V2: Record<string, string> = {
+          pending:    "Pending",
+          processing: "In progress",
+          completed:  "Completed",
+          failed:     "Rejected",
+        };
+        return reply.send({ status: REFILL_STATUS_V2[order.refillStatus] ?? order.refillStatus });
       }
 
       case "cancel": {

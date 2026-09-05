@@ -9,6 +9,7 @@ import { createStatusPollWorker } from "./workers/status-poll.worker.js";
 import { createRefillWorker } from "./workers/refill.worker.js";
 import { createExchangeRateWorker } from "./workers/exchange-rate.worker.js";
 import { createRefillStatusPollWorker } from "./workers/refill-status-poll.worker.js";
+import { createOrderCancelWorker } from "./workers/order-cancel.worker.js";
 
 async function startWorkers() {
   console.log("[workers] Starting NexusSMM Workers...");
@@ -30,6 +31,7 @@ async function startWorkers() {
   const refillWorker        = createRefillWorker(redis, prisma);
   const exchangeRateWorker       = createExchangeRateWorker(redis, prisma);
   const refillStatusPollWorker   = createRefillStatusPollWorker(redis, prisma);
+  const orderCancelWorker        = createOrderCancelWorker(redis, prisma);
 
   console.log("[workers] All workers started");
 
@@ -102,7 +104,7 @@ async function startWorkers() {
     console.log(`\nReceived ${signal}, shutting down workers...`);
     await Promise.all([
       orderForwardWorker.close(), statusPollWorker.close(),
-      refillWorker.close(), exchangeRateWorker.close(), refillStatusPollWorker.close(),
+      refillWorker.close(), exchangeRateWorker.close(), refillStatusPollWorker.close(), orderCancelWorker.close(),
     ]);
     await Promise.all([
       queues.orderForward.close(), queues.statusPoll.close(),
@@ -117,7 +119,7 @@ async function startWorkers() {
   process.on("SIGTERM", () => shutdown("SIGTERM"));
   process.on("SIGINT",  () => shutdown("SIGINT"));
 
-  [orderForwardWorker, statusPollWorker, refillWorker, exchangeRateWorker, refillStatusPollWorker].forEach((w) => {
+  [orderForwardWorker, statusPollWorker, refillWorker, exchangeRateWorker, refillStatusPollWorker, orderCancelWorker].forEach((w) => {
     w.on("error", (err: Error) => console.error(`[worker:${w.name}] Error:`, err.message));
   });
 

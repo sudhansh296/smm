@@ -7,8 +7,8 @@ const querySchema = z.object({
   type: z
     .enum(["DEPOSIT_INR", "DEPOSIT_USDT", "ORDER_CHARGE", "REFUND", "ADMIN_ADJUSTMENT"])
     .optional(),
-  dateFrom: z.string().optional(),
-  dateTo: z.string().optional(),
+  dateFrom: z.string().datetime({ message: "Invalid date format (use ISO 8601)" }).optional(),
+  dateTo:   z.string().datetime({ message: "Invalid date format (use ISO 8601)" }).optional(),
 });
 
 export default async function transactionsRoute(fastify: FastifyInstance) {

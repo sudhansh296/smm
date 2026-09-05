@@ -54,7 +54,7 @@ Write-Host "    node `"$env:APPDATA\npm\node_modules\pnpm\bin\pnpm.cjs`" --filte
 Write-Host ""
 Write-Host "  Terminal 2 (BullMQ workers):" -ForegroundColor White
 Write-Host "    cd c:\smm\nexussmm" -ForegroundColor Gray
-Write-Host "    `$env:WORKER_MODE='true'; node `"$env:APPDATA\npm\node_modules\pnpm\bin\pnpm.cjs`" --filter @nexussmm/api start:worker" -ForegroundColor Gray
+Write-Host "    node `"$env:APPDATA\npm\node_modules\pnpm\bin\pnpm.cjs`" --filter @nexussmm/api dev:worker" -ForegroundColor Gray
 Write-Host ""
 Write-Host "  Terminal 3 (Next.js frontend):" -ForegroundColor White
 Write-Host "    cd c:\smm\nexussmm" -ForegroundColor Gray

@@ -12,6 +12,7 @@ export interface Queues {
   statusPoll: Queue<StatusPollJobData>;
   refill: Queue<RefillJobData>;
   exchangeRateSync: Queue<ExchangeRateSyncJobData>;
+  orderCancel: Queue<{ orderId: string }>;
 }
 
 export function createQueues(redis: Redis): Queues {
@@ -70,5 +71,16 @@ export function createQueues(redis: Redis): Queues {
     },
   });
 
-  return { orderForward, statusPoll, refill, exchangeRateSync };
+  const orderCancel = new Queue<{ orderId: string }>("order-cancel", {
+    connection,
+    skipVersionCheck: true,
+    defaultJobOptions: {
+      attempts: 5,
+      backoff: { type: "exponential", delay: 10_000 }, // 10s → 20s → 40s → 80s → 160s
+      removeOnComplete: { count: 500 },
+      removeOnFail: { count: 200 },
+    },
+  });
+
+  return { orderForward, statusPoll, refill, exchangeRateSync, orderCancel };
 }

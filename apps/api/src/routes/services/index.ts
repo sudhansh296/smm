@@ -22,6 +22,8 @@ export default async function serviceRoutes(fastify: FastifyInstance) {
       const where = {
         isEnabled: true,
         deletedAt: null,
+        // Fix 7: only show services from enabled, non-archived providers
+        provider: { isEnabled: true, deletedAt: null } as never,
         ...(q.categoryId && { categoryId: q.categoryId }),
         ...(q.search && {
           OR: [

@@ -26,6 +26,27 @@ function calcCancelRefund(costUsd: string, quantity: number, remains: number | u
   return total.times(new Decimal(remains).dividedBy(quantity)).toDecimalPlaces(8);
 }
 
+// Enqueue a cancel retry job — called when provider cancel fails on first attempt
+export async function enqueueOrderCancelRetry(
+  queues: { orderCancel: { add: Function } },
+  orderId: string,
+): Promise<void> {
+  try {
+    await queues.orderCancel.add(
+      "retry-cancel",
+      { orderId },
+      {
+        jobId: `cancel:${orderId}`,  // deterministic — one retry job per order
+        removeOnComplete: true,
+        removeOnFail: false,
+      },
+    );
+    console.log(`[cancel-service] Enqueued retry cancel job for order ${orderId}`);
+  } catch (err) {
+    console.error(`[cancel-service] Failed to enqueue cancel retry for ${orderId}:`, err);
+  }
+}
+
 export async function cancelOrder(
   prisma: PrismaClient,
   orderId: string,
@@ -70,7 +91,12 @@ export async function cancelOrder(
           const fwdStatus = await fwdClient.getStatus(order.providerOrderId);
           if (!("error" in fwdStatus) && fwdStatus.status !== undefined && fwdStatus.remains !== undefined) {
             const parsed = Number(fwdStatus.remains);
-            if (!isNaN(parsed)) { fwdRemains = parsed; fwdFetchOk = true; }
+            if (
+              !isNaN(parsed) &&
+              Number.isInteger(parsed) &&
+              parsed >= 0 &&
+              parsed <= order.quantity
+            ) { fwdRemains = parsed; fwdFetchOk = true; }
           }
         } catch { /* network error — stay CANCEL_REQUESTED */ }
         if (!fwdFetchOk) {
@@ -179,8 +205,13 @@ export async function cancelOrder(
         console.warn(`[cancel-service] Fresh status has no remains for ${orderId} — staying CANCEL_REQUESTED`);
       } else {
         const parsed = Number(freshStatus.remains);
-        if (isNaN(parsed)) {
-          console.warn(`[cancel-service] Fresh status NaN remains for ${orderId} — staying CANCEL_REQUESTED`);
+        if (
+          isNaN(parsed) ||
+          !Number.isInteger(parsed) ||
+          parsed < 0 ||
+          parsed > order.quantity
+        ) {
+          console.warn(`[cancel-service] Fresh status invalid remains (${parsed}) for ${orderId} — staying CANCEL_REQUESTED`);
         } else {
           freshRemains = parsed;
           statusFetchSuccess = true;
@@ -238,7 +269,12 @@ async function finaliseCancel(
     const current = await tx.$queryRaw<Array<{ status: string }>>`
       SELECT status FROM orders WHERE id = ${orderId} FOR UPDATE
     `;
-    if (!current[0] || current[0].status === "CANCELLED") return; // already done
+    // Fix 2: block if order reached any terminal or financial state mid-race
+    const safeToCancel = ["PENDING","FORWARDING","PROCESSING","IN_PROGRESS","CANCEL_REQUESTED"];
+    if (!current[0] || !safeToCancel.includes(current[0].status)) {
+      // Order moved to COMPLETED/PARTIAL/REFUNDED/CANCELLED — do not overwrite
+      return;
+    }
     await tx.order.update({ where: { id: orderId }, data: { status: "CANCELLED" } });
     if (refundAmount.greaterThan(0)) {
       // Fix #1: only catch AlreadyRefundedError — real errors propagate and rollback transaction

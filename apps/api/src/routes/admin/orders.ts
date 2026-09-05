@@ -25,8 +25,8 @@ export default async function adminOrdersRoute(fastify: FastifyInstance) {
       status:     z.string().optional(),
       userId:     z.string().optional(),
       providerId: z.string().optional(),
-      dateFrom:   z.string().optional(),
-      dateTo:     z.string().optional(),
+      dateFrom:   z.string().datetime({ message: 'Invalid date' }).optional(),
+      dateTo:     z.string().datetime({ message: 'Invalid date' }).optional(),
     }).parse(request.query);
 
     const skip = (q.page - 1) * q.limit;

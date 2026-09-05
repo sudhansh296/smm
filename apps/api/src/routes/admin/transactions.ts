@@ -13,8 +13,8 @@ export default async function adminTransactionsRoute(fastify: FastifyInstance) {
           limit: z.coerce.number().min(1).max(100).default(20),
           type: z.string().optional(),
           userId: z.string().optional(),
-          dateFrom: z.string().optional(),
-          dateTo: z.string().optional(),
+          dateFrom: z.string().datetime({ message: 'Invalid date' }).optional(),
+          dateTo:   z.string().datetime({ message: 'Invalid date' }).optional(),
         })
         .parse(request.query);
 
