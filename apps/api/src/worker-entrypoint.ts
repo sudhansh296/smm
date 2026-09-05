@@ -10,18 +10,18 @@ import { createRefillWorker } from "./workers/refill.worker.js";
 import { createExchangeRateWorker } from "./workers/exchange-rate.worker.js";
 
 async function startWorkers() {
-  console.log("ðŸ”§ Starting NexusSMM Workers...");
+  console.log("Ã°Å¸â€Â§ Starting NexusSMM Workers...");
 
   // Connect to services
   const prisma = new PrismaClient();
   await prisma.$connect();
-  console.log("âœ… PostgreSQL connected");
+  console.log("Ã¢Å“â€¦ PostgreSQL connected");
 
   const redis = new Redis(env.REDIS_URL, {
     maxRetriesPerRequest: null, // Required for BullMQ
     enableReadyCheck: false,
   });
-  console.log("âœ… Redis connected");
+  console.log("Ã¢Å“â€¦ Redis connected");
 
   const queues = createQueues(redis);
 
@@ -31,15 +31,15 @@ async function startWorkers() {
   const refillWorker = createRefillWorker(redis, prisma);
   const exchangeRateWorker = createExchangeRateWorker(redis, prisma);
 
-  console.log("âœ… All workers started");
+  console.log("Ã¢Å“â€¦ All workers started");
 
-  // Bug 4: Recovery â€” re-enqueue PENDING orders older than 5 min with no providerOrderId
+  // Bug 4: Recovery Ã¢â‚¬â€ re-enqueue PENDING orders older than 5 min with no providerOrderId
   // This handles the case where Redis was down after DB commit (job was lost)
   async function recoverPendingOrders() {
     try {
       // Issue 4 fix: recover orders that are PENDING with no providerOrderId
       // (wallet charged + order created but forwarding job was lost)
-      // Orders with providerOrderId are already being delivered — do not re-enqueue.
+      // Orders with providerOrderId are already being delivered â€” do not re-enqueue.
       const stuckOrders = await prisma.order.findMany({
         where: {
           status: "PENDING",
@@ -58,7 +58,7 @@ async function startWorkers() {
             "forward",
             { orderId: order.id },
             {
-              jobId: order.id,     // deterministic — prevents duplicate queue entries
+              jobId: order.id,     // deterministic â€” prevents duplicate queue entries
               attempts: 3,
               backoff: { type: "exponential", delay: 5000 },
             },
@@ -76,16 +76,23 @@ async function startWorkers() {
     }
   }
 
-  // Run recovery after a short delay to let workers initialize
-  setTimeout(() => { recoverPendingOrders().catch((e) => console.error("[worker-entrypoint] Recovery error:", e)); }, 5000);
+  // Fix 4: run recovery at startup after 5s, then every 2 minutes
+  // Catches orders where DB commit succeeded but BullMQ job was lost (Redis down at commit time)
+  setTimeout(() => {
+    recoverPendingOrders().catch((e) => console.error("[worker-entrypoint] Startup recovery error:", e));
+    // Periodic recovery every 2 minutes
+    setInterval(() => {
+      recoverPendingOrders().catch((e) => console.error("[worker-entrypoint] Periodic recovery error:", e));
+    }, 2 * 60 * 1000);
+  }, 5000);
 
-  // Register repeatable status poll job â€” every 2 minutes
+  // Register repeatable status poll job Ã¢â‚¬â€ every 2 minutes
   await queues.statusPoll.add(
     "poll-all-open-orders",
     {},
     { repeat: { every: 120_000 } },
   );
-  console.log("âœ… Status poll job registered (every 2 min)");
+  console.log("Ã¢Å“â€¦ Status poll job registered (every 2 min)");
 
   // Register exchange rate sync based on DB settings
   const currencySettings = await prisma.currencySettings.findUnique({
@@ -101,9 +108,9 @@ async function startWorkers() {
       {},
       { repeat: { pattern: cronExpression } },
     );
-    console.log(`âœ… Exchange rate sync registered (${currencySettings.autoUpdateFreq})`);
+    console.log(`Ã¢Å“â€¦ Exchange rate sync registered (${currencySettings.autoUpdateFreq})`);
   } else {
-    console.log("â„¹ï¸  Exchange rate auto-sync disabled");
+    console.log("Ã¢â€žÂ¹Ã¯Â¸Â  Exchange rate auto-sync disabled");
   }
 
   // Graceful shutdown
@@ -127,7 +134,7 @@ async function startWorkers() {
     await prisma.$disconnect();
     await redis.quit();
 
-    console.log("âœ… Workers shut down cleanly");
+    console.log("Ã¢Å“â€¦ Workers shut down cleanly");
     process.exit(0);
   };
 
@@ -143,10 +150,10 @@ async function startWorkers() {
     },
   );
 
-  console.log("ðŸš€ Workers running. Press Ctrl+C to stop.");
+  console.log("Ã°Å¸Å¡â‚¬ Workers running. Press Ctrl+C to stop.");
 }
 
 startWorkers().catch((err) => {
-  console.error("âŒ Worker startup failed:", err);
+  console.error("Ã¢ÂÅ’ Worker startup failed:", err);
   process.exit(1);
 });

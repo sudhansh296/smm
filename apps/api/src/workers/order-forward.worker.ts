@@ -25,6 +25,16 @@ export function createOrderForwardWorker(redis: Redis, prisma: PrismaClient) {
         return;
       }
 
+      // Fix 3: FORWARDING state — if order is FORWARDING, provider call is in progress
+      // This means a prior attempt sent to provider; treat same as providerOrderId set
+      if ((order as any).status === "FORWARDING") {
+        console.warn(
+          `[order-forward] Order ${orderId} is in FORWARDING state — previous attempt may have ` +
+          `reached provider but response was lost. Leaving for manual admin review.`
+        );
+        return;
+      }
+
       // Already forwarded — ensure PROCESSING, do not re-send
       if (order.providerOrderId) {
         console.log(`[order-forward] Order ${orderId} already forwarded (${order.providerOrderId})`);
@@ -43,113 +53,124 @@ export function createOrderForwardWorker(redis: Redis, prisma: PrismaClient) {
       }
 
       // ── Redis lock — prevents duplicate upstream orders on BullMQ retry ──────
-      // Issue 3 fix: the lock does NOT cancel or refund on lock-already-exists.
-      // A lost-response case (sent to provider but DB never got providerOrderId)
-      // is logged for manual review ONLY. We never auto-refund without confirmed
-      // providerOrderId because the provider may be delivering the order.
+      // Fix 1: Lock is only held during the actual provider HTTP call.
+      // On KNOWN provider error (e.g. insufficient balance, service not found),
+      // we delete the lock so the next BullMQ retry can attempt again cleanly.
+      // On network timeout (where provider may have accepted), lock stays until TTL.
       const lockKey = `order-forward-lock:${orderId}`;
       const lockAcquired = await redis.set(lockKey, "1", "EX", 120, "NX");
 
       if (!lockAcquired) {
-        // Lock exists + no providerOrderId = previous attempt sent to provider,
-        // response was lost (network timeout). Cannot safely re-send.
-        // Do NOT cancel/refund — provider may be delivering. Log for manual review.
+        // Lock exists + no providerOrderId = prior attempt may have reached provider
+        // but we lost the response. Cannot safely re-send — leave PENDING for admin.
         console.error(
-          `[order-forward] Order ${orderId}: forwarding lock already held with no providerOrderId. ` +
-          `Possible lost response from provider. Leaving as PENDING for manual admin review. ` +
-          `Check provider dashboard before deciding to cancel or confirm.`,
+          `[order-forward] Order ${orderId}: lock held, no providerOrderId. ` +
+          `Possible lost response. Staying PENDING for admin review.`
         );
-        // Let the job complete without action — order stays PENDING
-        // Admin can then either: manually set PROCESSING (if provider confirmed) or cancel+refund
         return;
       }
 
-      // Renew lock for the duration of the provider call
-      await redis.set(lockKey, "1", "EX", 120);
+      // Fix 3: Mark FORWARDING before making the provider call
+      // This way, if the process crashes between the provider call and DB update,
+      // the next retry sees FORWARDING and does not re-send to provider
+      const markedForwarding = await prisma.order.updateMany({
+        where: { id: orderId, status: "PENDING" },
+        data: { status: "FORWARDING" } as never,
+      });
+      if (markedForwarding.count === 0) {
+        // Order was cancelled between lock acquisition and here
+        await redis.del(lockKey);
+        console.log(`[order-forward] Order ${orderId} was cancelled before FORWARDING mark`);
+        return;
+      }
 
-      // ── Try PRIMARY provider ──────────────────────────────────────────────────
-      const primaryClient = new ProviderClient(order.service.provider);
-      const result = await primaryClient.addOrder(
-        order.service.providerServiceId,
-        order.link,
-        order.quantity,
-      );
+      try {
+        // ── Try PRIMARY provider ────────────────────────────────────────────────
+        const primaryClient = new ProviderClient(order.service.provider);
+        const result = await primaryClient.addOrder(
+          order.service.providerServiceId,
+          order.link,
+          order.quantity,
+        );
 
-      if (!("error" in result)) {
-        // Issue 2 fix: Cancellation-vs-forward race.
-        // Use updateMany with status:"PENDING" condition so a concurrent cancel
-        // (which sets CANCELLED) causes updated.count === 0 and we log the conflict.
-        const updated = await prisma.order.updateMany({
-          where: { id: orderId, status: "PENDING" },
-          data: {
-            status: "PROCESSING",
-            providerOrderId: result.order.toString(),
-            fulfillmentProviderId: order.service.providerId,
-          } as never,
-        });
-
-        if (updated.count === 0) {
-          // Order was cancelled while provider was already processing it.
-          // Wallet refund already happened via cancel flow.
-          // Provider will continue delivering — admin needs to reconcile.
-          console.warn(
-            `[order-forward] Order ${orderId} was cancelled while provider was processing it. ` +
-            `Provider order: ${result.order}. ` +
-            `Wallet already refunded by cancel flow. Admin must cancel on provider side manually.`,
-          );
-        } else {
+        if (!("error" in result)) {
+          await prisma.order.update({
+            where: { id: orderId },
+            data: {
+              status: "PROCESSING",
+              providerOrderId: result.order.toString(),
+              fulfillmentProviderId: order.service.providerId,
+            } as never,
+          });
+          // Lock can be deleted — we have providerOrderId now
+          await redis.del(lockKey);
           console.log(`[order-forward] Order ${orderId} forwarded via PRIMARY → ${result.order}`);
+          return;
         }
-        return;
-      }
 
-      // ── Primary failed — try BACKUP ───────────────────────────────────────────
-      console.warn(`[order-forward] Primary failed for ${orderId}: ${result.error}`);
+        // ── Primary returned KNOWN error — try BACKUP ───────────────────────────
+        // Fix 1: known provider error → delete lock so retry can attempt backup next time
+        console.warn(`[order-forward] Primary failed for ${orderId}: ${result.error}`);
 
-      const backupProviderId = order.service.backupProviderId;
-      const backupServiceId = order.service.backupProviderServiceId;
+        const backupProviderId = order.service.backupProviderId;
+        const backupServiceId = order.service.backupProviderServiceId;
 
-      if (backupProviderId && backupServiceId) {
-        const backupProvider = await prisma.provider.findUnique({ where: { id: backupProviderId } });
+        if (backupProviderId && backupServiceId) {
+          const backupProvider = await prisma.provider.findUnique({ where: { id: backupProviderId } });
 
-        if (backupProvider?.isEnabled) {
-          const backupClient = new ProviderClient(backupProvider);
-          const backupResult = await backupClient.addOrder(backupServiceId, order.link, order.quantity);
+          if (backupProvider?.isEnabled) {
+            const backupClient = new ProviderClient(backupProvider);
+            const backupResult = await backupClient.addOrder(backupServiceId, order.link, order.quantity);
 
-          if (!("error" in backupResult)) {
-            const updated = await prisma.order.updateMany({
-              where: { id: orderId, status: "PENDING" },
-              data: {
-                status: "PROCESSING",
-                providerOrderId: backupResult.order.toString(),
-                fulfillmentProviderId: backupProviderId,
-              } as never,
-            });
-
-            if (updated.count === 0) {
-              console.warn(
-                `[order-forward] Order ${orderId} was cancelled while backup provider was processing it. ` +
-                `Provider order: ${backupResult.order}. Admin must cancel on provider side manually.`,
-              );
-            } else {
+            if (!("error" in backupResult)) {
+              await prisma.order.update({
+                where: { id: orderId },
+                data: {
+                  status: "PROCESSING",
+                  providerOrderId: backupResult.order.toString(),
+                  fulfillmentProviderId: backupProviderId,
+                } as never,
+              });
+              await redis.del(lockKey);
               console.log(`[order-forward] Order ${orderId} forwarded via BACKUP → ${backupResult.order}`);
+              return;
             }
-            return;
+
+            // Both failed with known errors — delete lock and revert to PENDING for retry
+            await redis.del(lockKey);
+            await prisma.order.updateMany({
+              where: { id: orderId, status: "FORWARDING" } as never,
+              data: { status: "PENDING" },
+            });
+            throw new Error(`Both providers failed. Primary: ${result.error}. Backup: ${backupResult.error}`);
           }
-
-          throw new Error(`Both providers failed. Primary: ${result.error}. Backup: ${backupResult.error}`);
         }
-      }
 
-      // Both failed — throw so BullMQ retries (and eventually the failed handler runs)
-      throw new Error(`Provider error: ${result.error}`);
+        // No backup — delete lock and revert FORWARDING→PENDING for retry
+        await redis.del(lockKey);
+        await prisma.order.updateMany({
+          where: { id: orderId, status: "FORWARDING" } as never,
+          data: { status: "PENDING" },
+        });
+        throw new Error(`Provider error: ${result.error}`);
+
+      } catch (err) {
+        // Network/timeout error — do NOT delete lock (provider may have accepted)
+        // Revert FORWARDING→PENDING only for non-network errors (already thrown above for those)
+        // For unexpected errors, revert to PENDING so admin can investigate
+        const isKnownError = err instanceof Error && err.message.startsWith("Provider error:");
+        const isBothFailed = err instanceof Error && err.message.startsWith("Both providers failed");
+        if (!isKnownError && !isBothFailed) {
+          // Unexpected error — could be network timeout — keep lock, leave as FORWARDING for manual review
+          console.error(`[order-forward] Unexpected error for ${orderId}:`, err);
+        }
+        throw err;
+      }
     },
     { connection: redis, skipVersionCheck: true, concurrency: 5 },
   );
 
-  // All retries exhausted — cancel + refund
-  // This is safe because: if provider got the order, it would have set providerOrderId.
-  // If providerOrderId is still null here, provider never accepted it.
+  // All retries exhausted — only refund if provider NEVER accepted (no providerOrderId)
   worker.on("failed", async (
     job: { data: OrderForwardJobData; opts: { attempts?: number }; attemptsMade: number } | undefined,
     err: Error,
@@ -166,16 +187,27 @@ export function createOrderForwardWorker(redis: Redis, prisma: PrismaClient) {
           costUsd: true, userId: true, inrRateAtOrder: true,
           status: true, refundedAt: true, providerOrderId: true,
         },
-      });
+      }) as any;
 
-      // Only auto-refund if: order still PENDING and provider never accepted (no providerOrderId)
-      // If providerOrderId is set, provider is delivering — do not auto-refund.
-      if (!order || (order as any).refundedAt) return;
-      if ((order as any).providerOrderId) {
-        // Provider accepted before final failure — do not auto-refund
-        console.error(`[order-forward] Order ${orderId} has providerOrderId=${(order as any).providerOrderId} but all retries failed. Manual review needed.`);
+      if (!order || order.refundedAt) return;
+
+      // Provider accepted the order — do not auto-refund, needs manual review
+      if (order.providerOrderId) {
+        console.error(
+          `[order-forward] Order ${orderId} has providerOrderId but all retries failed. Manual review needed.`
+        );
         return;
       }
+
+      // FORWARDING state = unknown whether provider got it — leave for admin
+      if (order.status === "FORWARDING") {
+        console.error(
+          `[order-forward] Order ${orderId} stuck in FORWARDING. Provider response unknown. Manual review needed.`
+        );
+        return;
+      }
+
+      // PENDING with no providerOrderId — provider never accepted, safe to refund
       if (order.status !== "PENDING") return;
 
       await prisma.$transaction(async (tx) => {

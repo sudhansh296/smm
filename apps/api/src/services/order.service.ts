@@ -12,7 +12,7 @@ import type { Redis } from "ioredis";
 
 /**
  * Creates an order: validates, deducts balance, creates DB record, enqueues job.
- * All DB writes happen in a single transaction — no nesting.
+ * All DB writes happen in a single transaction â€” no nesting.
  */
 export async function createOrder(
   prisma: PrismaClient,
@@ -41,7 +41,7 @@ export async function createOrder(
   }
 
   // 3. Calculate cost: sellingPriceUsd is per-unit price
-  // e.g. $4.20/1000 → sellingPriceUsd = 0.0042 → cost for 988 = 0.0042 × 988 = $4.15
+  // e.g. $4.20/1000 â†’ sellingPriceUsd = 0.0042 â†’ cost for 988 = 0.0042 Ã— 988 = $4.15
   const sellingPrice = new Decimal(service.sellingPriceUsd.toString());
   const costUsd = sellingPrice.times(quantity).toDecimalPlaces(8);
 
@@ -95,7 +95,7 @@ export async function createOrder(
         type: "ORDER_CHARGE" as TransactionType,
         amountUsd: costUsd.negated().toDecimalPlaces(8).toNumber(),
         inrRate: inrRate.toDecimalPlaces(4).toNumber(),
-        description: `Order #${newOrder.id.slice(-8)} — ${service.name}`,
+        description: `Order #${newOrder.id.slice(-8)} â€” ${service.name}`,
         balanceBefore: balance.toDecimalPlaces(8).toNumber(),
         balanceAfter: newBalance.toDecimalPlaces(8).toNumber(),
       },
@@ -105,7 +105,16 @@ export async function createOrder(
   });
 
   // 6. Enqueue for forwarding to provider
-  await queues.orderForward.add("forward", { orderId: order.id });
+  // Fix 5: deterministic jobId = orderId — recovery logic uses this same ID
+  await queues.orderForward.add(
+    "forward",
+    { orderId: order.id },
+    {
+      jobId: order.id,   // deterministic — prevents duplicate queue entries
+      attempts: 5,
+      backoff: { type: "exponential", delay: 3000 },
+    },
+  );
 
   return {
     orderId: order.id,

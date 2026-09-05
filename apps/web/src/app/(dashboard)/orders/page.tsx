@@ -11,7 +11,7 @@ import { formatUsd, formatInr, formatDate, getStatusColor } from "@/lib/utils";
 import { RefreshCcw, XCircle } from "lucide-react";
 import { toast } from "sonner";
 
-const STATUSES = ["ALL", "PENDING", "PROCESSING", "IN_PROGRESS", "COMPLETED", "PARTIAL", "CANCELLED", "REFUNDED"];
+const STATUSES = ["ALL", "PENDING", "PROCESSING", "IN_PROGRESS", "COMPLETED", "PARTIAL", "CANCEL_REQUESTED", "CANCELLED", "REFUNDED"];
 
 export default function OrdersPage() {
   const [status, setStatus] = useState("ALL");
@@ -25,6 +25,9 @@ export default function OrdersPage() {
         params: { status: status === "ALL" ? undefined : status, page, limit: 20 },
       }).then((r) => r.data),
     placeholderData: (prev) => prev,
+    // Fix 6: auto-refresh every 30s so PENDINGâ†’PROCESSINGâ†’COMPLETED updates without manual reload
+    refetchInterval: 30_000,
+    staleTime: 0,
   });
 
   const cancelMutation = useMutation({
@@ -102,7 +105,7 @@ export default function OrdersPage() {
                     <p className="text-xs text-muted-foreground">{formatDate(order.createdAt)}</p>
                   </div>
                   <div className="flex flex-col sm:flex-row gap-1.5 shrink-0">
-                    {["PENDING", "PROCESSING"].includes(order.status) && (
+                    {["PENDING", "FORWARDING", "PROCESSING", "IN_PROGRESS"].includes(order.status) && (
                       <Button size="sm" variant="outline"
                         onClick={() => cancelMutation.mutate(order.id)}
                         disabled={cancelMutation.isPending}

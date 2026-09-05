@@ -8,7 +8,8 @@ import { refundOrderTx } from "../../services/wallet.service.js";
 const querySchema = z.object({
   page: z.coerce.number().min(1).default(1),
   limit: z.coerce.number().min(1).max(100).default(20),
-  status: z.enum(["PENDING","PROCESSING","IN_PROGRESS","COMPLETED","PARTIAL","CANCELLED","REFUNDED"]).optional(),
+  status: z.enum(["PENDING","FORWARDING","PROCESSING","IN_PROGRESS","COMPLETED","PARTIAL",
+    "CANCEL_REQUESTED","CANCELLED","REFUNDED"]).optional(),
 });
 
 export default async function userOrdersRoute(fastify: FastifyInstance) {
@@ -16,7 +17,7 @@ export default async function userOrdersRoute(fastify: FastifyInstance) {
     const q = querySchema.parse(request.query);
     const skip = (q.page - 1) * q.limit;
     const userId = request.user.sub;
-    const where = { userId, ...(q.status && { status: q.status }) };
+    const where = { userId, ...(q.status && { status: q.status as never }) };
 
     const [orders, total] = await Promise.all([
       fastify.prisma.order.findMany({
@@ -41,7 +42,10 @@ export default async function userOrdersRoute(fastify: FastifyInstance) {
     });
   });
 
-  // Cancel order â€” atomic: cancel DB + refund + provider cancel (best-effort)
+  // Cancel order — Fix 2: two-phase cancellation
+  // PENDING orders: can cancel + refund immediately (provider never got the order)
+  // PROCESSING orders with providerOrderId: set CANCEL_REQUESTED, try provider cancel,
+  //   only refund after provider confirms cancellation
   fastify.post("/orders/:id/cancel", { preHandler: [fastify.authenticate] }, async (request, reply) => {
     const { id } = z.object({ id: z.string() }).parse(request.params);
     const userId = request.user.sub;
@@ -52,56 +56,117 @@ export default async function userOrdersRoute(fastify: FastifyInstance) {
     }) as any;
 
     if (!order || order.userId !== userId) throw new NotFoundError("Order not found");
-    if (!["PENDING", "PROCESSING"].includes(order.status)) {
-      throw new ValidationError("Only PENDING or PROCESSING orders can be cancelled");
+
+    const cancelableStatuses = ["PENDING", "FORWARDING", "PROCESSING", "IN_PROGRESS", "CANCEL_REQUESTED"];
+    if (!cancelableStatuses.includes(order.status)) {
+      throw new ValidationError("This order cannot be cancelled");
     }
 
-    // Atomic: row-lock order, mark cancelled, refund â€” all in one transaction
-    await fastify.prisma.$transaction(async (tx) => {
-      const locked = await tx.$queryRaw<Array<{ status: string; refundedAt: Date | null }>>`
-        SELECT status, "refundedAt" FROM orders WHERE id = ${id} FOR UPDATE
-      `;
-      if (!locked[0] || !["PENDING", "PROCESSING"].includes(locked[0].status)) return;
+    // Already in cancel flow
+    if (order.status === "CANCEL_REQUESTED") {
+      return reply.send({ message: "Cancellation already in progress", status: "CANCEL_REQUESTED" });
+    }
 
-      await tx.order.update({ where: { id }, data: { status: "CANCELLED" } });
+    // PENDING or FORWARDING — provider never got the order (or we don't know)
+    // For FORWARDING: we don't know if provider got it — treat as CANCEL_REQUESTED to be safe
+    if (["PENDING", "FORWARDING"].includes(order.status)) {
+      await fastify.prisma.$transaction(async (tx) => {
+        const locked = await tx.$queryRaw<Array<{ status: string }>>`
+          SELECT status FROM orders WHERE id = ${id} FOR UPDATE
+        `;
+        if (!locked[0] || !["PENDING", "FORWARDING"].includes(locked[0].status)) return;
 
-      await refundOrderTx(
-        tx as Parameters<typeof refundOrderTx>[0],
-        id,
-        {
+        await tx.order.update({ where: { id }, data: { status: "CANCELLED" } });
+
+        await refundOrderTx(
+          tx as Parameters<typeof refundOrderTx>[0],
+          id,
+          {
+            userId,
+            amountUsd: new Decimal(order.costUsd.toString()),
+            inrRate: new Decimal(order.inrRateAtOrder.toString()),
+            description: `Refund: order #${id.slice(-8)} cancelled (not yet sent to provider)`,
+          },
+        );
+        await tx.notification.create({
+          data: { userId, message: `Order #${id.slice(-8)} cancelled. $${new Decimal(order.costUsd.toString()).toFixed(2)} refunded.` },
+        });
+      });
+      return reply.send({ message: "Order cancelled and refunded" });
+    }
+
+    // PROCESSING / IN_PROGRESS — provider has the order
+    // Set CANCEL_REQUESTED first, then try provider cancel
+    if (!order.providerOrderId) {
+      // No providerOrderId but PROCESSING — safe to cancel and refund immediately
+      await fastify.prisma.$transaction(async (tx) => {
+        await tx.order.update({ where: { id }, data: { status: "CANCELLED" } });
+        await refundOrderTx(tx as Parameters<typeof refundOrderTx>[0], id, {
           userId,
           amountUsd: new Decimal(order.costUsd.toString()),
           inrRate: new Decimal(order.inrRateAtOrder.toString()),
-          description: `Refund: order #${id.slice(-8)} cancelled by user`,
-        },
-      );
-
-      await tx.notification.create({
-        data: { userId, message: `Order #${id.slice(-8)} cancelled. $${new Decimal(order.costUsd.toString()).toFixed(2)} refunded.` },
+          description: `Refund: order #${id.slice(-8)} cancelled`,
+        });
+        await tx.notification.create({
+          data: { userId, message: `Order #${id.slice(-8)} cancelled. $${new Decimal(order.costUsd.toString()).toFixed(2)} refunded.` },
+        });
       });
-    });
-
-    // Cancel with provider AFTER DB is consistent (best-effort, non-blocking)
-    // Provider may already be processing â€” cancel attempt is advisory
-    if (order.providerOrderId) {
-      const providerId = (order as any).fulfillmentProviderId ?? order.service.providerId;
-      let provider = order.service.provider;
-      if (providerId !== order.service.providerId) {
-        const alt = await fastify.prisma.provider.findUnique({ where: { id: providerId } });
-        if (alt) provider = alt;
-      }
-      try {
-        const client = new ProviderClient(provider);
-        await client.cancelOrder(order.providerOrderId);
-      } catch (err) {
-        fastify.log.warn({ err, orderId: id }, "Provider cancel attempt failed (order already refunded locally)");
-      }
+      return reply.send({ message: "Order cancelled and refunded" });
     }
 
-    return reply.send({ message: "Order cancelled and refunded" });
+    // Has providerOrderId — must confirm with provider before refunding
+    // Step 1: mark CANCEL_REQUESTED atomically
+    const marked = await fastify.prisma.order.updateMany({
+      where: { id, status: order.status, userId },
+      data: { status: "CANCEL_REQUESTED" } as never,
+    });
+    if (marked.count === 0) {
+      throw new ValidationError("Order status changed — please try again");
+    }
+
+    // Step 2: attempt provider cancel
+    const providerId = order.fulfillmentProviderId ?? order.service.providerId;
+    let provider = order.service.provider;
+    if (providerId !== order.service.providerId) {
+      const alt = await fastify.prisma.provider.findUnique({ where: { id: providerId } });
+      if (alt) provider = alt;
+    }
+
+    let providerCancelled = false;
+    try {
+      const client = new ProviderClient(provider);
+      await client.cancelOrder(order.providerOrderId);
+      providerCancelled = true;
+    } catch (err) {
+      fastify.log.warn({ err, orderId: id }, "Provider cancel request failed");
+    }
+
+    if (providerCancelled) {
+      // Provider confirmed — now safe to refund
+      await fastify.prisma.$transaction(async (tx) => {
+        await tx.order.update({ where: { id }, data: { status: "CANCELLED" } });
+        await refundOrderTx(tx as Parameters<typeof refundOrderTx>[0], id, {
+          userId,
+          amountUsd: new Decimal(order.costUsd.toString()),
+          inrRate: new Decimal(order.inrRateAtOrder.toString()),
+          description: `Refund: order #${id.slice(-8)} cancelled (provider confirmed)`,
+        });
+        await tx.notification.create({
+          data: { userId, message: `Order #${id.slice(-8)} cancelled. $${new Decimal(order.costUsd.toString()).toFixed(2)} refunded.` },
+        });
+      });
+      return reply.send({ message: "Order cancelled and refunded" });
+    } else {
+      // Provider cancel failed — order stays CANCEL_REQUESTED
+      // Admin will process manually; status-poll worker may also pick it up
+      return reply.send({
+        message: "Cancellation requested. Waiting for provider confirmation. Refund will be issued once confirmed.",
+        status: "CANCEL_REQUESTED",
+      });
+    }
   });
 
-  // Request refill â€” guard against duplicate requests
+  // Request refill
   fastify.post("/orders/:id/refill", { preHandler: [fastify.authenticate] }, async (request, reply) => {
     const { id } = z.object({ id: z.string() }).parse(request.params);
     const userId = request.user.sub;
@@ -117,12 +182,10 @@ export default async function userOrdersRoute(fastify: FastifyInstance) {
     }
     if (!order.service.supportsRefill) throw new ForbiddenError("This service does not support refill");
 
-    // Atomic conditional update â€” only succeeds if not already pending/processing
     const updated = await fastify.prisma.order.updateMany({
       where: {
-        id,
-        userId,
-        status: { in: ["COMPLETED", "PARTIAL"] },
+        id, userId,
+        status: { in: ["COMPLETED", "PARTIAL"] } as never,
         refillStatus: { notIn: ["pending", "processing"] },
       },
       data: { refillRequestedAt: new Date(), refillStatus: "pending" },
@@ -132,10 +195,11 @@ export default async function userOrdersRoute(fastify: FastifyInstance) {
       throw new ValidationError("A refill is already in progress for this order");
     }
 
-    // Deterministic job ID â€” prevents duplicate jobs even if request fires twice
+    const bucket = Math.floor(Date.now() / (5 * 60 * 1000));
     await fastify.queues.refill.add("refill", { orderId: id }, {
-      jobId: `refill:${id}`,
+      jobId: `refill:${id}:${bucket}`,
       removeOnComplete: true,
+      removeOnFail: true,
     });
 
     return reply.send({ message: "Refill requested" });
