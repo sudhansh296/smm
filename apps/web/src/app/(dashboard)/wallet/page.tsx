@@ -59,7 +59,7 @@ export default function WalletPage() {
             {wallet ? formatUsd(wallet.balanceUsd) : " -- "}
           </p>
           <p className="text-primary-foreground/70 mt-1 text-sm">
-            ≈ {wallet ? formatInr(wallet.balanceInr) : " -- "} · Rate Rs.
+            ≈ {wallet ? formatInr(wallet.balanceInr) : " -- "} · Rate ₹
             {wallet ? Number(wallet.effectiveInrRate).toFixed(2) : " -- "}/$1
           </p>
         </CardContent>

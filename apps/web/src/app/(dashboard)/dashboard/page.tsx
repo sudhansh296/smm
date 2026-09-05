@@ -56,7 +56,7 @@ export default function DashboardPage() {
     },
     {
       label: "INR Rate",
-      value: walletData ? `Rs.${Number(walletData.effectiveInrRate).toFixed(2)}` : " -- ",
+      value: walletData ? `₹${Number(walletData.effectiveInrRate).toFixed(2)}` : " -- ",
       sub: "Per $1 USD",
       icon: TrendingUp,
       color: "text-green-600",

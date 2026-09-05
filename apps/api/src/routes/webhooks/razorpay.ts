@@ -70,7 +70,7 @@ export default async function razorpayWebhookRoute(fastify: FastifyInstance) {
           usdAmount,
           {
             type: "DEPOSIT_INR",
-            description: `Razorpay deposit Rs.${amountInr.toFixed(2)} @ Rs.${inrRate.toFixed(4)}/$1`,
+            description: `Razorpay deposit ₹${amountInr.toFixed(2)} @ ₹${inrRate.toFixed(4)}/$1`,
             amountInr: new Decimal(amountInr),
             inrRate,
             paymentGatewayId: paymentId,

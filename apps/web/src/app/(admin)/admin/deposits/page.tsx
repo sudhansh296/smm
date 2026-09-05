@@ -52,7 +52,7 @@ export default function AdminDepositsPage() {
             <div className="rounded-lg bg-muted p-3 text-sm space-y-1">
               <p><span className="text-muted-foreground">User:</span> {approveD.userEmail}</p>
               <p><span className="text-muted-foreground">Method:</span> {METHOD_LABELS[approveD.method]??approveD.method}</p>
-              {approveD.amountInr&&<p><span className="text-muted-foreground">Amount:</span> Rs.{approveD.amountInr}</p>}
+              {approveD.amountInr&&<p><span className="text-muted-foreground">Amount:</span> ₹{approveD.amountInr}</p>}
               {approveD.amountUsdt&&<p><span className="text-muted-foreground">Amount:</span> ${approveD.amountUsdt} USDT</p>}
               {approveD.txId&&<p><span className="text-muted-foreground">TxID:</span> <span className="font-mono text-xs">{approveD.txId}</span></p>}
             </div>
@@ -91,7 +91,7 @@ export default function AdminDepositsPage() {
         {isLoading?<p className="text-center py-8 text-muted-foreground text-sm">Loading...</p>:!data?.deposits?.length?<p className="text-center py-8 text-muted-foreground text-sm">No deposits</p>:data.deposits.map((d:any)=>(
           <Card key={d.id}><CardContent className="p-4 space-y-2">
             <div className="flex justify-between gap-2"><div><p className="font-medium text-sm">{d.userEmail}</p><p className="text-xs text-muted-foreground">{formatDate(d.createdAt)}</p></div><Badge className={"text-xs "+STATUS_COLORS[d.status]}>{d.status}</Badge></div>
-            <div className="flex gap-2 text-xs flex-wrap"><Badge className={"text-xs "+(METHOD_COLORS[d.method]??"bg-gray-100 text-gray-800")}>{METHOD_LABELS[d.method]??d.method}</Badge>{d.amountInr&&<span>Rs.{d.amountInr}</span>}{d.amountUsdt&&<span>${d.amountUsdt} USDT</span>}</div>
+            <div className="flex gap-2 text-xs flex-wrap"><Badge className={"text-xs "+(METHOD_COLORS[d.method]??"bg-gray-100 text-gray-800")}>{METHOD_LABELS[d.method]??d.method}</Badge>{d.amountInr&&<span>₹{d.amountInr}</span>}{d.amountUsdt&&<span>${d.amountUsdt} USDT</span>}</div>
             {d.txId&&<p className="text-xs font-mono text-muted-foreground truncate">TxID: {d.txId}</p>}
             {d.status==="PENDING"&&<div className="flex gap-2 pt-1"><Button size="sm" className="flex-1 h-8 bg-green-600 hover:bg-green-700 text-white text-xs" onClick={()=>setApproveD(d)}><CheckCircle className="h-3 w-3 mr-1"/>Approve</Button><Button size="sm" variant="outline" className="flex-1 h-8 text-red-600 border-red-200 text-xs" onClick={()=>setRejectD(d)}><XCircle className="h-3 w-3 mr-1"/>Reject</Button></div>}
           </CardContent></Card>
@@ -104,7 +104,7 @@ export default function AdminDepositsPage() {
           <tr key={d.id} className="hover:bg-muted/30">
             <td className="px-4 py-3"><p className="font-medium text-sm">{d.userName}</p><p className="text-xs text-muted-foreground">{d.userEmail}</p></td>
             <td className="px-4 py-3"><Badge className={"text-xs "+(METHOD_COLORS[d.method]??"bg-gray-100 text-gray-800")}>{METHOD_LABELS[d.method]??d.method}</Badge></td>
-            <td className="px-4 py-3 text-right font-medium">{d.amountInr?`Rs.${d.amountInr}`:`$${d.amountUsdt} USDT`}</td>
+            <td className="px-4 py-3 text-right font-medium">{d.amountInr?`₹${d.amountInr}`:`$${d.amountUsdt} USDT`}</td>
             <td className="px-4 py-3 text-xs font-mono truncate max-w-28">{d.txId??" -- "}</td>
             <td className="px-4 py-3 text-xs text-muted-foreground truncate max-w-24">{d.adminNote??" -- "}</td>
             <td className="px-4 py-3 text-center"><Badge className={"text-xs "+STATUS_COLORS[d.status]}>{d.status}</Badge></td>

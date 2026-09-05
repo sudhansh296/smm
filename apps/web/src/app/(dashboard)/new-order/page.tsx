@@ -135,7 +135,7 @@ export default function NewOrderPage() {
                 <p className="font-medium">{selectedService.name}</p>
                 <p className="text-muted-foreground text-xs sm:text-sm">
                   Rate: ${(Number(selectedService.sellingPriceUsd) * 1000).toFixed(2)} / 1000 units
-                  (Rs.{(Number(selectedService.sellingPriceUsd) * 1000 * Number(wallet?.effectiveInrRate ?? 85)).toFixed(2)})
+                  (₹{(Number(selectedService.sellingPriceUsd) * 1000 * Number(wallet?.effectiveInrRate ?? 85)).toFixed(2)})
                 </p>
                 <p className="text-muted-foreground text-xs">
                   Min: {selectedService.minQuantity.toLocaleString()} ·

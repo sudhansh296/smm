@@ -17,9 +17,9 @@ import Link from "next/link";
 
 declare global { interface Window { Razorpay: new (o: object) => { open(): void }; } }
 
-const rzpSchema = z.object({ amountInr: z.coerce.number().min(50, "Minimum Rs.50").max(100000) });
+const rzpSchema = z.object({ amountInr: z.coerce.number().min(50, "Minimum ₹50").max(100000) });
 const manualSchema = z.object({
-  amountInr: z.coerce.number().min(50, "Minimum Rs.50").max(100000),
+  amountInr: z.coerce.number().min(50, "Minimum ₹50").max(100000),
   utrNumber: z.string().min(6, "Enter valid UTR / Transaction ID"),
   note: z.string().optional(),
 });
@@ -110,7 +110,7 @@ export default function DepositInrPage() {
         <Button asChild variant="ghost" size="sm"><Link href="/wallet"><ArrowLeft className="h-4 w-4" /></Link></Button>
         <div>
           <h1 className="text-2xl sm:text-3xl font-bold">Deposit INR</h1>
-          <p className="text-muted-foreground text-sm">Rate: Rs.{effectiveRate.toFixed(2)} = $1</p>
+          <p className="text-muted-foreground text-sm">Rate: ₹{effectiveRate.toFixed(2)} = $1</p>
         </div>
       </div>
 
@@ -134,7 +134,7 @@ export default function DepositInrPage() {
           <CardContent>
             <form onSubmit={rzpForm.handleSubmit(onRazorpay)} className="space-y-4">
               <div className="space-y-1.5">
-                <Label>Amount (Rs.)</Label>
+                <Label>Amount (₹)</Label>
                 <div className="relative">
                   <IndianRupee className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
                   <Input type="number" placeholder="500" min={50} max={100000} className="pl-9" {...rzpForm.register("amountInr")} />
@@ -145,7 +145,7 @@ export default function DepositInrPage() {
                 {quickAmounts.map((amt) => (
                   <button key={amt} type="button" onClick={() => rzpForm.setValue("amountInr", amt)}
                     className="py-1.5 text-xs border rounded-md hover:bg-primary hover:text-primary-foreground hover:border-primary transition-colors font-medium">
-                    Rs.{amt.toLocaleString()}
+                    ₹{amt.toLocaleString()}
                   </button>
                 ))}
               </div>
@@ -207,7 +207,7 @@ export default function DepositInrPage() {
 
                 <form onSubmit={manualForm.handleSubmit(onManual)} className="space-y-3">
                   <div className="space-y-1.5">
-                    <Label>Amount Transferred (Rs.)</Label>
+                    <Label>Amount Transferred (₹)</Label>
                     <div className="relative">
                       <IndianRupee className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
                       <Input type="number" placeholder="500" className="pl-9" {...manualForm.register("amountInr")} />

@@ -12,7 +12,7 @@ export function formatUsd(amount: string | number | null | undefined): string {
 
 export function formatInr(amount: string | number | null | undefined): string {
   const n = Number(amount ?? 0);
-  return `Rs.${isNaN(n) ? "0.00" : n.toFixed(2)}`;
+  return `₹${isNaN(n) ? "0.00" : n.toFixed(2)}`;
 }
 
 export function formatBalance(usd: string, inr: string): string {

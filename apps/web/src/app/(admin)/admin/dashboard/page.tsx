@@ -39,7 +39,7 @@ export default function AdminDashboardPage() {
     { label: "Total Deposits", value: stats ? formatUsd(stats.summary.totalDeposits) : " -- ",  icon: TrendingUp,   color: "text-indigo-600", bg: "bg-indigo-50" },
     { label: "Total Refunds",  value: stats ? formatUsd(stats.summary.totalRefunds) : " -- ",   icon: RefreshCcw,   color: "text-red-500",    bg: "bg-red-50" },
     { label: "Providers",      value: providers?.length ?? " -- ",                              icon: Server,       color: "text-orange-600", bg: "bg-orange-50" },
-    { label: "INR Rate",       value: currency ? `Rs.${Number(currency.effectiveRate).toFixed(2)}` : " -- ", icon: DollarSign, color: "text-teal-600", bg: "bg-teal-50" },
+    { label: "INR Rate",       value: currency ? `₹${Number(currency.effectiveRate).toFixed(2)}` : " -- ", icon: DollarSign, color: "text-teal-600", bg: "bg-teal-50" },
   ];
 
   return (
@@ -47,7 +47,7 @@ export default function AdminDashboardPage() {
       <div>
         <h1 className="text-2xl sm:text-3xl font-bold">Admin Dashboard</h1>
         <p className="text-muted-foreground mt-1 text-sm">
-          INR Rate: Rs.{currency?.effectiveRate ?? " -- "}/$1 · Last 7 days analytics
+          INR Rate: ₹{currency?.effectiveRate ?? " -- "}/$1 · Last 7 days analytics
         </p>
       </div>
 

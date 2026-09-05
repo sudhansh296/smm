@@ -7,7 +7,7 @@ import { ValidationError } from "../../lib/errors.js";
 export default async function manualInrDepositRoute(fastify: FastifyInstance) {
   fastify.post("/manual-inr", { preHandler: [fastify.authenticate] }, async (request, reply) => {
     const parsed = z.object({
-      amountInr: z.coerce.number().min(50, "Minimum Rs.50").max(100000),
+      amountInr: z.coerce.number().min(50, "Minimum ₹50").max(100000),
       utrNumber: z.string().min(6, "Enter valid UTR / Transaction ID").max(50),
       note:      z.string().max(200).optional(),
     }).parse(request.body);

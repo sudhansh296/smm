@@ -149,7 +149,7 @@ export function Sidebar() {
         <div className="px-5 py-3 border-b bg-muted/30">
           <p className="text-xs text-muted-foreground">Wallet Balance</p>
           <p className="font-semibold text-primary text-base">${balanceUsd}</p>
-          <p className="text-xs text-muted-foreground">~ Rs.{balanceInr}</p>
+          <p className="text-xs text-muted-foreground">~ ₹{balanceInr}</p>
         </div>
       )}
 
