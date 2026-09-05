@@ -45,7 +45,7 @@ export default async function userOrdersRoute(fastify: FastifyInstance) {
   // Cancel  --  delegates to shared cancel.service (fixes #1 FORWARDING, #2 provider response check)
   fastify.post("/orders/:id/cancel", { preHandler: [fastify.authenticate] }, async (request, reply) => {
     const { id } = z.object({ id: z.string() }).parse(request.params);
-    const result = await cancelOrder(fastify.prisma, id, request.user.sub, false);
+    const result = await cancelOrder(fastify.prisma, fastify.queues, id, request.user.sub, false);
     return reply.send({ message: result.message, status: result.status });
   });
 

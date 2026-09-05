@@ -98,6 +98,11 @@ export function createStatusPollWorker(redis: Redis, prisma: PrismaClient) {
                     }
                     const refundAmount = calcRefundAmount(order.costUsd.toString(), order.quantity, remains);
                     await prisma.$transaction(async (tx) => {
+                      // Fix 6: row lock + status check before finalizing
+                      const locked = await tx.$queryRaw<Array<{ status: string }>>`
+                        SELECT status FROM orders WHERE id = ${order.id} FOR UPDATE
+                      `;
+                      if (!locked[0] || locked[0].status !== "CANCEL_REQUESTED") return;
                       await tx.order.update({
                         where: { id: order.id },
                         data: { status: "CANCELLED" as never, remains, startCount } as never,
@@ -126,6 +131,11 @@ export function createStatusPollWorker(redis: Redis, prisma: PrismaClient) {
                   } else if (newStatus === "PARTIAL" && remainsKnown && remains > 0) {
                     const refundAmount = calcRefundAmount(order.costUsd.toString(), order.quantity, remains);
                     await prisma.$transaction(async (tx) => {
+                      // Fix 6: row lock + status check before finalizing
+                      const locked = await tx.$queryRaw<Array<{ status: string }>>`
+                        SELECT status FROM orders WHERE id = ${order.id} FOR UPDATE
+                      `;
+                      if (!locked[0] || locked[0].status !== "CANCEL_REQUESTED") return;
                       await tx.order.update({ where: { id: order.id }, data: { status: "PARTIAL" as never, remains, startCount } as never });
                       if (refundAmount.greaterThan(0)) {
                         try {
@@ -148,11 +158,18 @@ export function createStatusPollWorker(redis: Redis, prisma: PrismaClient) {
                     });
 
                   } else if (newStatus === "COMPLETED") {
-                    await prisma.order.update({ where: { id: order.id }, data: { status: "COMPLETED" as never, remains, startCount } as never });
-                    await (prisma as any).notification.create({ data: {
-                      userId:  order.userId,
-                      message: `Order #${order.id.slice(-8)} could not be cancelled  --  provider already completed delivery.`,
-                    }});
+                    // Fix 6: row lock + status check before finalizing
+                    await prisma.$transaction(async (tx) => {
+                      const locked = await tx.$queryRaw<Array<{ status: string }>>`
+                        SELECT status FROM orders WHERE id = ${order.id} FOR UPDATE
+                      `;
+                      if (!locked[0] || locked[0].status !== "CANCEL_REQUESTED") return;
+                      await tx.order.update({ where: { id: order.id }, data: { status: "COMPLETED" as never, remains, startCount } as never });
+                      await (tx as any).notification.create({ data: {
+                        userId:  order.userId,
+                        message: `Order #${order.id.slice(-8)} could not be cancelled  --  provider already completed delivery.`,
+                      }});
+                    });
                   }
                   // PROCESSING/IN_PROGRESS  --  leave as CANCEL_REQUESTED
                   continue;

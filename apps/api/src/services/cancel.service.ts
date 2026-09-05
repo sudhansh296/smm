@@ -1,8 +1,14 @@
 import { Decimal } from "decimal.js";
 import type { PrismaClient } from "@nexussmm/db";
+import type { Queues } from "@nexussmm/queue";
 import { ProviderClient } from "./provider.service.js";
 import { refundOrderTx } from "./wallet.service.js";
 import { NotFoundError, ValidationError, AlreadyRefundedError } from "../lib/errors.js";
+
+export interface FinaliseResult {
+  finalized: boolean;
+  blockedByStatus?: string;
+}
 
 export interface CancelResult {
   status: "CANCELLED" | "CANCEL_REQUESTED";
@@ -47,8 +53,63 @@ export async function enqueueOrderCancelRetry(
   }
 }
 
+// Fix 5: returns whether the transaction actually finalized the cancel
+async function finaliseCancel(
+  prisma: PrismaClient,
+  orderId: string,
+  order: any,
+  remains: number | undefined,
+): Promise<FinaliseResult> {
+  const refundAmount = calcCancelRefund(order.costUsd.toString(), order.quantity, remains);
+
+  let result: FinaliseResult = { finalized: false };
+
+  await prisma.$transaction(async (tx) => {
+    // Fix 4: verify order is still in a cancellable state before overwriting
+    const current = await tx.$queryRaw<Array<{ status: string }>>`
+      SELECT status FROM orders WHERE id = ${orderId} FOR UPDATE
+    `;
+    // Fix 2: block if order reached any terminal or financial state mid-race
+    const safeToCancel = ["PENDING","FORWARDING","PROCESSING","IN_PROGRESS","CANCEL_REQUESTED"];
+    if (!current[0] || !safeToCancel.includes(current[0].status)) {
+      // Order moved to COMPLETED/PARTIAL/REFUNDED/CANCELLED  --  do not overwrite
+      result = { finalized: false, ...(current[0]?.status !== undefined && { blockedByStatus: current[0].status }) };
+      return;
+    }
+    await tx.order.update({ where: { id: orderId }, data: { status: "CANCELLED" } });
+    if (refundAmount.greaterThan(0)) {
+      // Fix #1: only catch AlreadyRefundedError  --  real errors propagate and rollback transaction
+      try {
+        await refundOrderTx(tx as Parameters<typeof refundOrderTx>[0], orderId, {
+          userId: order.userId,
+          amountUsd: refundAmount,
+          inrRate: new Decimal(order.inrRateAtOrder.toString()),
+          description: `Refund: order #${orderId.slice(-8)} cancelled (provider confirmed)`,
+        });
+      } catch (err) {
+        if (err instanceof AlreadyRefundedError) {
+          console.log(`[cancel-service] Order ${orderId} already refunded  --  skipping`);
+        } else {
+          throw err; // DB error, Prisma error, etc.  --  rollback
+        }
+      }
+    }
+    await tx.notification.create({
+      data: {
+        userId: order.userId,
+        message: `Order #${orderId.slice(-8)} cancelled. ${refundAmount.greaterThan(0) ? `$${refundAmount.toFixed(2)} refunded.` : "No refund (fully delivered before cancel)."}`,
+      },
+    });
+    result = { finalized: true };
+  });
+
+  return result;
+}
+
+// Fix 1: added queues parameter so retry jobs can be enqueued on provider cancel failure
 export async function cancelOrder(
   prisma: PrismaClient,
+  queues: { orderCancel: { add: Function } },
   orderId: string,
   requestingUserId: string,
   isAdmin = false,
@@ -102,9 +163,19 @@ export async function cancelOrder(
         if (!fwdFetchOk) {
           return { status: "CANCEL_REQUESTED", refunded: false, message: "Cancellation accepted. Refund calculated once delivery status confirmed." };
         }
-        await finaliseCancel(prisma, orderId, order, fwdRemains);
+        // Fix 5: check finalize result
+        const finalizeResult = await finaliseCancel(prisma, orderId, order, fwdRemains);
+        if (!finalizeResult.finalized) {
+          return {
+            status: "CANCEL_REQUESTED",
+            refunded: false,
+            message: `Order is now ${finalizeResult.blockedByStatus ?? "in a terminal state"} — cancellation not applied`,
+          };
+        }
         return { status: "CANCELLED", refunded: true, message: "Order cancelled and refunded" };
       }
+      // Provider cancel failed in FORWARDING path — enqueue retry
+      await enqueueOrderCancelRetry(queues, orderId);
     }
     return { status: "CANCEL_REQUESTED", refunded: false, message: "Cancellation requested. Refund will be issued once provider confirms." };
   }
@@ -136,7 +207,7 @@ export async function cancelOrder(
     if (!fresh) throw new NotFoundError("Order not found");
     // Recursive call with fresh state  --  one level deep only (status is now FORWARDING/PROCESSING)
     if (["FORWARDING", "PROCESSING", "IN_PROGRESS"].includes(fresh.status)) {
-      return cancelOrder(prisma, orderId, requestingUserId, isAdmin);
+      return cancelOrder(prisma, queues, orderId, requestingUserId, isAdmin);
     }
     return { status: "CANCEL_REQUESTED", refunded: false, message: `Order in ${fresh.status}  --  cancellation requested` };
   }
@@ -164,7 +235,7 @@ export async function cancelOrder(
     });
     if (didCancel) return { status: "CANCELLED", refunded: true, message: "Order cancelled and refunded" };
     // providerOrderId appeared or status changed  --  fall through to normal cancel flow
-    return cancelOrder(prisma, orderId, requestingUserId, isAdmin);
+    return cancelOrder(prisma, queues, orderId, requestingUserId, isAdmin);
   }
 
   // Fix #5: if service doesn't support cancel, reject when provider has the order
@@ -232,10 +303,20 @@ export async function cancelOrder(
       };
     }
 
-    await finaliseCancel(prisma, orderId, order, freshRemains);
+    // Fix 5: check finalize result
+    const finalizeResult = await finaliseCancel(prisma, orderId, order, freshRemains);
+    if (!finalizeResult.finalized) {
+      return {
+        status: "CANCEL_REQUESTED",
+        refunded: false,
+        message: `Order is now ${finalizeResult.blockedByStatus ?? "in a terminal state"} — cancellation not applied`,
+      };
+    }
     return { status: "CANCELLED", refunded: true, message: "Order cancelled and refunded" };
   }
 
+  // Fix 1: provider cancel failed — enqueue retry job
+  await enqueueOrderCancelRetry(queues, orderId);
   return { status: "CANCEL_REQUESTED", refunded: false, message: "Cancellation requested. Refund will be issued once provider confirms." };
 }
 
@@ -254,50 +335,4 @@ async function attemptProviderCancel(provider: any, providerOrderId: string): Pr
     console.warn("[cancel-service] Provider cancel threw:", err);
     return "failed";
   }
-}
-
-async function finaliseCancel(
-  prisma: PrismaClient,
-  orderId: string,
-  order: any,
-  remains: number | undefined,
-): Promise<void> {
-  const refundAmount = calcCancelRefund(order.costUsd.toString(), order.quantity, remains);
-
-  await prisma.$transaction(async (tx) => {
-    // Fix 4: verify order is still in a cancellable state before overwriting
-    const current = await tx.$queryRaw<Array<{ status: string }>>`
-      SELECT status FROM orders WHERE id = ${orderId} FOR UPDATE
-    `;
-    // Fix 2: block if order reached any terminal or financial state mid-race
-    const safeToCancel = ["PENDING","FORWARDING","PROCESSING","IN_PROGRESS","CANCEL_REQUESTED"];
-    if (!current[0] || !safeToCancel.includes(current[0].status)) {
-      // Order moved to COMPLETED/PARTIAL/REFUNDED/CANCELLED  --  do not overwrite
-      return;
-    }
-    await tx.order.update({ where: { id: orderId }, data: { status: "CANCELLED" } });
-    if (refundAmount.greaterThan(0)) {
-      // Fix #1: only catch AlreadyRefundedError  --  real errors propagate and rollback transaction
-      try {
-        await refundOrderTx(tx as Parameters<typeof refundOrderTx>[0], orderId, {
-          userId: order.userId,
-          amountUsd: refundAmount,
-          inrRate: new Decimal(order.inrRateAtOrder.toString()),
-          description: `Refund: order #${orderId.slice(-8)} cancelled (provider confirmed)`,
-        });
-      } catch (err) {
-        if (err instanceof AlreadyRefundedError) {
-          console.log(`[cancel-service] Order ${orderId} already refunded  --  skipping`);
-        } else {
-          throw err; // DB error, Prisma error, etc.  --  rollback
-        }
-      }
-    }
-    await tx.notification.create({
-      data: {
-        userId: order.userId,
-        message: `Order #${orderId.slice(-8)} cancelled. ${refundAmount.greaterThan(0) ? `$${refundAmount.toFixed(2)} refunded.` : "No refund (fully delivered before cancel)."}`,
-      },
-    });
-  });
 }

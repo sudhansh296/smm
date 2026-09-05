@@ -31,6 +31,10 @@ export default async function orderRoutes(fastify: FastifyInstance) {
         quantity,
       );
 
+      // Fix 7: queue failure → 202 (order saved, will be processed by recovery worker)
+      if (!result.queued) {
+        return reply.status(202).send(result);
+      }
       return reply.status(201).send(result);
     },
   );

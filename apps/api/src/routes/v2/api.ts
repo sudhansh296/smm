@@ -97,6 +97,10 @@ export default async function apiV2Route(fastify: FastifyInstance) {
         }
         try {
           const result = await createOrder(fastify.prisma, fastify.redis, fastify.queues, user.id, serviceId, link, quantity);
+          // Fix 7: queue failure → 202 (order saved, will be processed by recovery worker)
+          if (!result.queued) {
+            return reply.status(202).send({ order: result.orderId, message: result.message });
+          }
           return reply.send({ order: result.orderId });
         } catch (err: unknown) {
           return reply.status(400).send({ error: err instanceof Error ? err.message : "Order failed" });
@@ -209,7 +213,7 @@ export default async function apiV2Route(fastify: FastifyInstance) {
 
         const results = await Promise.all(orderIds.map(async (orderId) => {
           try {
-            const result = await cancelOrder(fastify.prisma, orderId, user.id, false);
+            const result = await cancelOrder(fastify.prisma, fastify.queues, orderId, user.id, false);
             // cancel: 1 = immediate cancel, cancel: {pending:true} = CANCEL_REQUESTED
             return {
               order: orderId,

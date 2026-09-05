@@ -109,20 +109,32 @@ export async function createOrder(
 
   // 6. Enqueue for forwarding to provider
   // Fix 5: deterministic jobId = orderId  --  recovery logic uses this same ID
-  await queues.orderForward.add(
-    "forward",
-    { orderId: order.id },
-    {
-      jobId: order.id,   // deterministic  --  prevents duplicate queue entries
-      attempts: 5,
-      backoff: { type: "exponential", delay: 3000 },
-    },
-  );
+  // Fix 7: wrap in try/catch — wallet already deducted, order created; queue failure must not 500
+  let queued = true;
+  try {
+    await queues.orderForward.add(
+      "forward",
+      { orderId: order.id },
+      {
+        jobId: order.id,   // deterministic  --  prevents duplicate queue entries
+        attempts: 5,
+        backoff: { type: "exponential", delay: 3000 },
+      },
+    );
+  } catch (queueErr) {
+    queued = false;
+    console.error(`[order-service] Queue add failed for order ${order.id}:`, queueErr);
+    // Order exists in DB with PENDING status  --  recovery worker will pick it up
+  }
 
   return {
     orderId: order.id,
     costUsd: costUsd.toFixed(8),
     costInr: costUsd.times(inrRate).toFixed(2),
     status: order.status,
+    queued,
+    message: queued
+      ? undefined
+      : "Order accepted but queuing delayed. It will be processed automatically.",
   };
 }
