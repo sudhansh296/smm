@@ -211,7 +211,7 @@ export default function AdminOrdersPage() {
                 <th className="text-right px-4 py-3 font-medium">Cost</th>
                 <th className="text-center px-4 py-3 font-medium">Status</th>
                 <th className="text-left px-4 py-3 font-medium">Date</th>
-                <th className="px-4 py-3 font-medium">Actions</th>
+                <th className="px-4 py-3 font-medium whitespace-nowrap w-48">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y">
@@ -237,7 +237,7 @@ export default function AdminOrdersPage() {
                     </td>
                     <td className="px-4 py-3 text-xs text-muted-foreground">{formatDate(o.createdAt)}</td>
                     <td className="px-4 py-3">
-                      <div className="flex gap-1 items-center flex-wrap">
+                      <div className="flex gap-1 items-center flex-nowrap">
                         <Button size="sm" variant="ghost" title="Sync from provider" onClick={() => syncMutation.mutate(o.id)} disabled={syncMutation.isPending}>
                           <RefreshCw className="h-3 w-3" />
                         </Button>
@@ -253,7 +253,7 @@ export default function AdminOrdersPage() {
                           </Button>
                         )}
                         <Select onValueChange={(v) => statusMutation.mutate({ id: o.id, newStatus: v })}>
-                          <SelectTrigger className="h-8 w-28 text-xs"><SelectValue placeholder="Status" /></SelectTrigger>
+                          <SelectTrigger className="h-8 w-24 text-xs"><SelectValue placeholder="Status" /></SelectTrigger>
                           <SelectContent>
                             {["PENDING","PROCESSING","IN_PROGRESS","COMPLETED","PARTIAL","CANCELLED","REFUNDED"].map((s) =>
                               <SelectItem key={s} value={s} className="text-xs">{s}</SelectItem>
