@@ -46,26 +46,6 @@ export default function RegisterPage() {
         <CardDescription>Pay in INR or USDT crypto</CardDescription>
       </CardHeader>
       <CardContent>
-        {/* Google sign-up */}
-        <Button
-          type="button"
-          variant="outline"
-          className="w-full flex items-center gap-2 mb-4"
-          onClick={() => { window.location.href = `${API_URL}/auth/google`; }}
-        >
-          <GoogleIcon />
-          Sign up with Google
-        </Button>
-
-        <div className="relative mb-4">
-          <div className="absolute inset-0 flex items-center">
-            <span className="w-full border-t" />
-          </div>
-          <div className="relative flex justify-center text-xs uppercase">
-            <span className="bg-background px-2 text-muted-foreground">or with email</span>
-          </div>
-        </div>
-
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
           <div className="space-y-1.5">
             <Label>Full Name</Label>
@@ -89,6 +69,25 @@ export default function RegisterPage() {
           </div>
           <Button type="submit" className="w-full" loading={isRegistering}>Create Account</Button>
         </form>
+
+        <div className="relative my-4">
+          <div className="absolute inset-0 flex items-center">
+            <span className="w-full border-t" />
+          </div>
+          <div className="relative flex justify-center text-xs uppercase">
+            <span className="bg-background px-2 text-muted-foreground">or</span>
+          </div>
+        </div>
+
+        <Button
+          type="button"
+          variant="outline"
+          className="w-full flex items-center gap-2"
+          onClick={() => { window.location.href = `${API_URL}/auth/google`; }}
+        >
+          <GoogleIcon />
+          Sign up with Google
+        </Button>
 
         <p className="mt-4 text-center text-sm text-muted-foreground">
           Already have an account?{" "}
