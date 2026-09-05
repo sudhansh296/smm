@@ -81,7 +81,18 @@ export function createStatusPollWorker(redis: Redis, prisma: PrismaClient) {
                 if (!newStatus) continue;
 
                 if (newStatus === "CANCELLED") {
-                  // Provider finally cancelled — finalise: CANCELLED + refund
+                  // Provider cancelled — refund proportionally based on remains
+                  // Fix #4: if provider reports remains, only refund undelivered portion
+                  const totalCost = new Decimal(order.costUsd.toString());
+                  let refundAmount: Decimal;
+                  if (remains > 0 && remains < order.quantity) {
+                    // Partial delivery before cancellation
+                    refundAmount = totalCost.times(new Decimal(remains).dividedBy(order.quantity)).toDecimalPlaces(8);
+                  } else {
+                    // No delivery or full cancel — refund everything
+                    refundAmount = totalCost;
+                  }
+
                   await prisma.$transaction(async (tx) => {
                     await tx.order.update({
                       where: { id: order.id },
@@ -93,7 +104,7 @@ export function createStatusPollWorker(redis: Redis, prisma: PrismaClient) {
                         order.id,
                         {
                           userId: order.userId,
-                          amountUsd: new Decimal(order.costUsd.toString()),
+                          amountUsd: refundAmount,
                           inrRate: new Decimal(order.inrRateAtOrder.toString()),
                           description: `Refund: order #${order.id.slice(-8)} cancelled (provider confirmed via poll)`,
                         },
@@ -102,11 +113,11 @@ export function createStatusPollWorker(redis: Redis, prisma: PrismaClient) {
                     await (tx as any).notification.create({
                       data: {
                         userId: order.userId,
-                        message: `Order #${order.id.slice(-8)} cancelled and fully refunded.`,
+                        message: `Order #${order.id.slice(-8)} cancelled. $${refundAmount.toFixed(2)} refunded.`,
                       },
                     });
                   });
-                  console.log(`[status-poll] Order ${order.id} CANCEL_REQUESTED → CANCELLED + refunded`);
+                  console.log(`[status-poll] Order ${order.id} CANCEL_REQUESTED → CANCELLED + refunded $${refundAmount.toFixed(2)}`);
 
                 } else if (newStatus === "PARTIAL" && remains > 0) {
                   // Fix #7: provider delivered partial before cancel — issue proportional refund

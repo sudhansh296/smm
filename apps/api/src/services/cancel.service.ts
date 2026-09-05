@@ -65,6 +65,7 @@ export async function cancelOrder(
     if (order.providerOrderId) {
       const result = await attemptProviderCancel(prisma, order);
       if (result === "cancelled") {
+        // No fresh status needed for FORWARDING — if we just set it, likely nothing delivered
         await finaliseCancel(prisma, orderId, order);
         return { status: "CANCELLED", refunded: true, message: "Order cancelled and refunded" };
       }
@@ -138,9 +139,17 @@ export async function cancelOrder(
   }
 
   // Fix 2: check provider cancel response — {error:...} does NOT throw
+  // Fix #3: get fresh provider remains so finaliseCancel can do proportional refund
   const providerResult = await attemptProviderCancel(prisma, order);
   if (providerResult === "cancelled") {
-    await finaliseCancel(prisma, orderId, order);
+    // Fetch fresh status to know how many units were delivered before cancellation
+    let freshRemains: number | undefined;
+    try {
+      const client = new (await import("./provider.service.js")).ProviderClient(order.service.provider);
+      const freshStatus = await client.getStatus(order.providerOrderId);
+      freshRemains = freshStatus.remains ?? undefined;
+    } catch { /* ignore — use undefined = full refund */ }
+    await finaliseCancel(prisma, orderId, order, freshRemains);
     return { status: "CANCELLED", refunded: true, message: "Order cancelled and refunded" };
   }
 

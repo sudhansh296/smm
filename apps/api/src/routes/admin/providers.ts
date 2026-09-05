@@ -113,6 +113,7 @@ export default async function adminProvidersRoute(fastify: FastifyInstance) {
               minQuantity: Number(ps.min),
               maxQuantity: Number(ps.max),
               supportsRefill: ps.refill ?? false,
+              supportsCancel: (ps as any).cancel ?? true,
               // markupOverride intentionally NOT touched — preserved as-is
             },
           });
@@ -136,6 +137,7 @@ export default async function adminProvidersRoute(fastify: FastifyInstance) {
               minQuantity: Number(ps.min),
               maxQuantity: Number(ps.max),
               supportsRefill: ps.refill ?? false,
+              supportsCancel: (ps as any).cancel ?? true,
               isEnabled: true,
             },
           });

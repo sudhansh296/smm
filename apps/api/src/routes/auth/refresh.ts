@@ -14,35 +14,30 @@ export default async function refreshRoute(fastify: FastifyInstance) {
       include: { user: { select: { id: true, isAdmin: true, isSuspended: true } } },
     });
 
-    // Fix 10: distinguish genuine token reuse from multi-tab concurrent refresh race
-    // Genuine reuse: token was revoked AND a replacement was successfully created
-    // Race case: token was revoked but we're still in the window before replacement is visible
+    // Fix #5: distinguish genuine reuse from multi-tab race using a grace window.
+    // A 30-second window covers normal concurrent browser requests without being
+    // exploitable (attacker would need to replay within 30s of honest rotation).
     if (stored && stored.revokedAt) {
-      // Check if a replacement token was issued for this user AFTER this token was revoked
-      const replacementExists = await fastify.prisma.refreshToken.findFirst({
-        where: {
-          userId: stored.userId,
-          revokedAt: null,
-          createdAt: { gt: stored.revokedAt },
-        },
-      });
+      const secondsSinceRevoke = (Date.now() - stored.revokedAt.getTime()) / 1000;
 
-      if (replacementExists) {
-        // Genuine reuse: revoked token used AFTER rotation completed → security event
-        fastify.log.warn({ userId: stored.userId }, "Refresh token reuse detected — revoking all sessions");
-        await fastify.prisma.refreshToken.updateMany({
-          where: { userId: stored.userId, revokedAt: null },
-          data: { revokedAt: new Date() },
-        });
-        reply.clearCookie("refreshToken", { path: "/" });
-        reply.clearCookie("accessToken", { path: "/" });
-        throw new UnauthorizedError("Session invalidated due to suspicious activity. Please log in again.");
-      } else {
-        // Race case: token revoked very recently, replacement not yet visible
-        // Return 401 so client retries — the winning concurrent request will set new cookie
-        fastify.log.debug({ userId: stored.userId }, "Refresh race: token revoked but no replacement yet, returning 401 for retry");
+      if (secondsSinceRevoke <= 30) {
+        // Within grace window — almost certainly a multi-tab race, not an attack.
+        // Return 401 so client retries with the new cookie from the winning request.
+        fastify.log.debug({ userId: stored.userId, secondsSinceRevoke },
+          "Refresh token race (within grace window) — returning 401 for retry");
         throw new UnauthorizedError("Token rotated by concurrent request — please retry");
       }
+
+      // Outside grace window — token used long after rotation completed → security event
+      fastify.log.warn({ userId: stored.userId, secondsSinceRevoke },
+        "Refresh token reuse detected outside grace window — revoking all sessions");
+      await fastify.prisma.refreshToken.updateMany({
+        where: { userId: stored.userId, revokedAt: null },
+        data: { revokedAt: new Date() },
+      });
+      reply.clearCookie("refreshToken", { path: "/" });
+      reply.clearCookie("accessToken", { path: "/" });
+      throw new UnauthorizedError("Session invalidated due to suspicious activity. Please log in again.");
     }
 
     if (!stored || stored.expiresAt < new Date()) {
