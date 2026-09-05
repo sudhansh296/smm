@@ -14,15 +14,16 @@ export default async function refreshRoute(fastify: FastifyInstance) {
       include: { user: { select: { id: true, isAdmin: true, isSuspended: true } } },
     });
 
-    // Detect token reuse — if token was already revoked, someone may be replaying a stolen token
+    // Token was already revoked AND a replacement token was issued → reuse detected
+    // This is a genuine security event (stolen token replayed after rotation)
     if (stored && stored.revokedAt) {
-      // Revoke ALL sessions for this user as a precaution (token theft likely)
-      fastify.log.warn({ userId: stored.userId }, "Refresh token reuse detected — revoking all sessions");
+      fastify.log.warn({ userId: stored.userId }, "Refresh token reuse after rotation — revoking all sessions");
       await fastify.prisma.refreshToken.updateMany({
         where: { userId: stored.userId, revokedAt: null },
         data: { revokedAt: new Date() },
       });
       reply.clearCookie("refreshToken", { path: "/" });
+      reply.clearCookie("accessToken", { path: "/" });
       throw new UnauthorizedError("Session invalidated. Please log in again.");
     }
 
@@ -36,22 +37,21 @@ export default async function refreshRoute(fastify: FastifyInstance) {
       throw new UnauthorizedError("Account is suspended");
     }
 
-    // Bug 9 fix: Atomic revoke — only proceeds if token is still active
-    // Prevents rotation race condition where two concurrent requests both rotate the same token
+    // Issue 6 fix: atomic revoke — only the first concurrent request wins.
+    // If two tabs hit refresh simultaneously with the same token, one wins
+    // and the other gets a clean 401 (not a full session nuke).
+    // The losing request's browser will retry and get the new cookie from the winner.
     const revoked = await fastify.prisma.refreshToken.updateMany({
       where: { id: stored.id, revokedAt: null },
       data: { revokedAt: new Date() },
     });
 
     if (revoked.count === 0) {
-      // Another request already rotated this token — treat as reuse
-      fastify.log.warn({ userId: stored.userId }, "Refresh token rotation race — treating as reuse");
-      await fastify.prisma.refreshToken.updateMany({
-        where: { userId: stored.userId, revokedAt: null },
-        data: { revokedAt: new Date() },
-      });
-      reply.clearCookie("refreshToken", { path: "/" });
-      throw new UnauthorizedError("Session invalidated. Please log in again.");
+      // Another concurrent request already rotated this token.
+      // This is NOT a security event — it's a race between two honest requests.
+      // Return 401 so the client retries; it will get new cookies from the winning request.
+      fastify.log.debug({ userId: stored.userId }, "Refresh rotation race — other request already rotated, returning 401");
+      throw new UnauthorizedError("Token already rotated — please retry");
     }
 
     // Issue new token only after successfully revoking old one
@@ -60,14 +60,9 @@ export default async function refreshRoute(fastify: FastifyInstance) {
     const newExpiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
 
     await fastify.prisma.refreshToken.create({
-      data: {
-        userId: stored.user.id,
-        tokenHash: newTokenHash,
-        expiresAt: newExpiresAt,
-      },
+      data: { userId: stored.user.id, tokenHash: newTokenHash, expiresAt: newExpiresAt },
     });
 
-    // Bug 8 fix: cookie path changed to "/" so logout and other routes receive it
     reply.setCookie("refreshToken", newRawToken, {
       httpOnly: true,
       secure: process.env["NODE_ENV"] === "production",
@@ -80,7 +75,6 @@ export default async function refreshRoute(fastify: FastifyInstance) {
       { sub: stored.user.id, isAdmin: stored.user.isAdmin } as Parameters<typeof fastify.jwt.sign>[0],
     );
 
-    // Re-set HttpOnly access token cookie on each refresh
     reply.setCookie("accessToken", accessToken, {
       httpOnly: true,
       secure: process.env["NODE_ENV"] === "production",
@@ -89,6 +83,8 @@ export default async function refreshRoute(fastify: FastifyInstance) {
       maxAge: 900,
     });
 
-    return reply.send({ accessToken, expiresIn: 900 });
+    // Issue 8 fix: do NOT return accessToken in body
+    // Frontend uses HttpOnly cookie via withCredentials — body token is a security leak
+    return reply.send({ expiresIn: 900 });
   });
 }

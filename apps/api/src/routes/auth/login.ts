@@ -133,7 +133,7 @@ export default async function loginRoute(fastify: FastifyInstance) {
       maxAge: 7 * 24 * 60 * 60,
     });
 
-    // HttpOnly access token cookie — not readable by browser JS (XSS protection)
+    // HttpOnly access token cookie â€” not readable by browser JS (XSS protection)
     reply.setCookie("accessToken", accessToken, {
       httpOnly: true,
       secure: process.env["NODE_ENV"] === "production",
@@ -142,8 +142,10 @@ export default async function loginRoute(fastify: FastifyInstance) {
       maxAge: 900,
     });
 
+    // Issue 8 fix: do NOT return accessToken in body.
+    // HttpOnly cookie is the secure transport. API v2 clients that need
+    // a token should use the Authorization header via /api/v2 with their API key.
     return reply.send({
-      accessToken, // also in body for backward compat (API v2 clients that use Authorization header)
       expiresIn: 900,
       user: {
         id: user.id,

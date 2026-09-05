@@ -9,7 +9,7 @@ import { ProviderClient } from "../../services/provider.service.js";
 const API_V2_RATE_LIMIT_MAX = 60;
 const API_V2_RATE_WINDOW = 60_000;
 
-// Validate link is a real URL â€” prevents garbage reaching provider
+// Validate link is a real URL Ã¢â‚¬â€ prevents garbage reaching provider
 const linkSchema = z.string().url("Must be a valid URL").max(500);
 
 async function validateApiKey(fastify: FastifyInstance, key: string) {
@@ -84,7 +84,7 @@ export default async function apiV2Route(fastify: FastifyInstance) {
           return reply.status(400).send({ error: "Missing required parameters: service, link, quantity" });
         }
 
-        // Validate URL server-side â€” not just frontend
+        // Validate URL server-side Ã¢â‚¬â€ not just frontend
         const linkParsed = linkSchema.safeParse(link);
         if (!linkParsed.success) {
           return reply.status(400).send({ error: "Invalid link: must be a valid URL" });
@@ -131,7 +131,7 @@ export default async function apiV2Route(fastify: FastifyInstance) {
         if (!order) return reply.status(404).send({ error: "Order not found" });
         if (!order.service.supportsRefill) return reply.status(400).send({ error: "Service does not support refill" });
 
-        // Atomic conditional update â€” prevents race condition
+        // Atomic conditional update Ã¢â‚¬â€ prevents race condition
         const updated = await fastify.prisma.order.updateMany({
           where: {
             id: orderId,
@@ -144,8 +144,12 @@ export default async function apiV2Route(fastify: FastifyInstance) {
         if (updated.count === 0) {
           return reply.status(400).send({ error: "A refill is already in progress" });
         }
-        // Deterministic job ID prevents duplicate jobs
-        await fastify.queues.refill.add("refill", { orderId }, { jobId: `refill:${orderId}` });
+        const bucket = Math.floor(Date.now() / (5 * 60 * 1000));
+        await fastify.queues.refill.add("refill", { orderId }, {
+          jobId: `refill:${orderId}:${bucket}`,
+          removeOnComplete: true,
+          removeOnFail: true,
+        });
         return reply.send({ refill: orderId });
       }
 

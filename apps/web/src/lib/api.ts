@@ -11,7 +11,17 @@ export const api = axios.create({
 // No request interceptor needed — HttpOnly cookie sent automatically via withCredentials
 
 let isRefreshing = false;
-let refreshQueue: Array<() => void> = [];
+// Issue 7 fix: queue stores both resolve and reject so hanging requests are
+// properly rejected when refresh fails (not left pending forever)
+let refreshQueue: Array<{ resolve: () => void; reject: (err: unknown) => void }> = [];
+
+function flushQueue(error: unknown) {
+  for (const { resolve, reject } of refreshQueue) {
+    if (error) reject(error);
+    else resolve();
+  }
+  refreshQueue = [];
+}
 
 api.interceptors.response.use(
   (res) => res,
@@ -20,8 +30,12 @@ api.interceptors.response.use(
 
     if (error.response?.status === 401 && !original._retry) {
       if (isRefreshing) {
-        return new Promise((resolve) => {
-          refreshQueue.push(() => resolve(api(original)));
+        // Issue 7 fix: queue the request and wait for refresh to complete or fail
+        return new Promise((resolve, reject) => {
+          refreshQueue.push({
+            resolve: () => resolve(api(original)),
+            reject: (err) => reject(err),
+          });
         });
       }
 
@@ -31,12 +45,14 @@ api.interceptors.response.use(
       try {
         // Refresh — backend sets new HttpOnly cookies automatically
         await axios.post(`${BASE_URL}/auth/refresh`, {}, { withCredentials: true });
-        refreshQueue.forEach((cb) => cb());
-        refreshQueue = [];
+        // Issue 7 fix: resolve all queued requests now that we have new cookies
+        flushQueue(null);
         return api(original); // retry original request — new cookie already set
-      } catch {
+      } catch (refreshError) {
+        // Issue 7 fix: reject all queued requests so they don't hang forever
+        flushQueue(refreshError);
         if (typeof window !== "undefined") window.location.href = "/login";
-        return Promise.reject(error);
+        return Promise.reject(refreshError);
       } finally {
         isRefreshing = false;
       }

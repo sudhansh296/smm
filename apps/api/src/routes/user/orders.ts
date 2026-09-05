@@ -41,7 +41,7 @@ export default async function userOrdersRoute(fastify: FastifyInstance) {
     });
   });
 
-  // Cancel order — atomic: cancel DB + refund + provider cancel (best-effort)
+  // Cancel order â€” atomic: cancel DB + refund + provider cancel (best-effort)
   fastify.post("/orders/:id/cancel", { preHandler: [fastify.authenticate] }, async (request, reply) => {
     const { id } = z.object({ id: z.string() }).parse(request.params);
     const userId = request.user.sub;
@@ -56,7 +56,7 @@ export default async function userOrdersRoute(fastify: FastifyInstance) {
       throw new ValidationError("Only PENDING or PROCESSING orders can be cancelled");
     }
 
-    // Atomic: row-lock order, mark cancelled, refund — all in one transaction
+    // Atomic: row-lock order, mark cancelled, refund â€” all in one transaction
     await fastify.prisma.$transaction(async (tx) => {
       const locked = await tx.$queryRaw<Array<{ status: string; refundedAt: Date | null }>>`
         SELECT status, "refundedAt" FROM orders WHERE id = ${id} FOR UPDATE
@@ -82,7 +82,7 @@ export default async function userOrdersRoute(fastify: FastifyInstance) {
     });
 
     // Cancel with provider AFTER DB is consistent (best-effort, non-blocking)
-    // Provider may already be processing — cancel attempt is advisory
+    // Provider may already be processing â€” cancel attempt is advisory
     if (order.providerOrderId) {
       const providerId = (order as any).fulfillmentProviderId ?? order.service.providerId;
       let provider = order.service.provider;
@@ -101,7 +101,7 @@ export default async function userOrdersRoute(fastify: FastifyInstance) {
     return reply.send({ message: "Order cancelled and refunded" });
   });
 
-  // Request refill — guard against duplicate requests
+  // Request refill â€” guard against duplicate requests
   fastify.post("/orders/:id/refill", { preHandler: [fastify.authenticate] }, async (request, reply) => {
     const { id } = z.object({ id: z.string() }).parse(request.params);
     const userId = request.user.sub;
@@ -117,7 +117,7 @@ export default async function userOrdersRoute(fastify: FastifyInstance) {
     }
     if (!order.service.supportsRefill) throw new ForbiddenError("This service does not support refill");
 
-    // Atomic conditional update — only succeeds if not already pending/processing
+    // Atomic conditional update â€” only succeeds if not already pending/processing
     const updated = await fastify.prisma.order.updateMany({
       where: {
         id,
@@ -132,7 +132,7 @@ export default async function userOrdersRoute(fastify: FastifyInstance) {
       throw new ValidationError("A refill is already in progress for this order");
     }
 
-    // Deterministic job ID — prevents duplicate jobs even if request fires twice
+    // Deterministic job ID â€” prevents duplicate jobs even if request fires twice
     await fastify.queues.refill.add("refill", { orderId: id }, {
       jobId: `refill:${id}`,
       removeOnComplete: true,

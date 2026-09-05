@@ -10,18 +10,18 @@ import { createRefillWorker } from "./workers/refill.worker.js";
 import { createExchangeRateWorker } from "./workers/exchange-rate.worker.js";
 
 async function startWorkers() {
-  console.log("🔧 Starting NexusSMM Workers...");
+  console.log("ðŸ”§ Starting NexusSMM Workers...");
 
   // Connect to services
   const prisma = new PrismaClient();
   await prisma.$connect();
-  console.log("✅ PostgreSQL connected");
+  console.log("âœ… PostgreSQL connected");
 
   const redis = new Redis(env.REDIS_URL, {
     maxRetriesPerRequest: null, // Required for BullMQ
     enableReadyCheck: false,
   });
-  console.log("✅ Redis connected");
+  console.log("âœ… Redis connected");
 
   const queues = createQueues(redis);
 
@@ -31,29 +31,45 @@ async function startWorkers() {
   const refillWorker = createRefillWorker(redis, prisma);
   const exchangeRateWorker = createExchangeRateWorker(redis, prisma);
 
-  console.log("✅ All workers started");
+  console.log("âœ… All workers started");
 
-  // Bug 4: Recovery — re-enqueue PENDING orders older than 5 min with no providerOrderId
+  // Bug 4: Recovery â€” re-enqueue PENDING orders older than 5 min with no providerOrderId
   // This handles the case where Redis was down after DB commit (job was lost)
   async function recoverPendingOrders() {
     try {
+      // Issue 4 fix: recover orders that are PENDING with no providerOrderId
+      // (wallet charged + order created but forwarding job was lost)
+      // Orders with providerOrderId are already being delivered — do not re-enqueue.
       const stuckOrders = await prisma.order.findMany({
         where: {
           status: "PENDING",
           providerOrderId: null,
-          createdAt: { lt: new Date(Date.now() - 5 * 60 * 1000) },
+          createdAt: { lt: new Date(Date.now() - 5 * 60 * 1000) }, // older than 5 min
         },
         select: { id: true },
       });
+
+      let recovered = 0;
       for (const order of stuckOrders) {
-        const existing = await queues.orderForward.getJob(order.id);
-        if (!existing) {
-          await queues.orderForward.add("forward", { orderId: order.id }, { jobId: order.id });
+        // Check if a job already exists in the queue for this order
+        const existingJob = await queues.orderForward.getJob(order.id);
+        if (!existingJob) {
+          await queues.orderForward.add(
+            "forward",
+            { orderId: order.id },
+            {
+              jobId: order.id,     // deterministic — prevents duplicate queue entries
+              attempts: 3,
+              backoff: { type: "exponential", delay: 5000 },
+            },
+          );
           console.log(`[worker-entrypoint] Recovered stuck PENDING order ${order.id}`);
+          recovered++;
         }
       }
+
       if (stuckOrders.length > 0) {
-        console.log(`[worker-entrypoint] Recovery complete: checked ${stuckOrders.length} stuck orders`);
+        console.log(`[worker-entrypoint] Recovery: found ${stuckOrders.length} stuck, re-enqueued ${recovered}`);
       }
     } catch (err) {
       console.error("[worker-entrypoint] Recovery scan failed:", err);
@@ -63,13 +79,13 @@ async function startWorkers() {
   // Run recovery after a short delay to let workers initialize
   setTimeout(() => { recoverPendingOrders().catch((e) => console.error("[worker-entrypoint] Recovery error:", e)); }, 5000);
 
-  // Register repeatable status poll job — every 2 minutes
+  // Register repeatable status poll job â€” every 2 minutes
   await queues.statusPoll.add(
     "poll-all-open-orders",
     {},
     { repeat: { every: 120_000 } },
   );
-  console.log("✅ Status poll job registered (every 2 min)");
+  console.log("âœ… Status poll job registered (every 2 min)");
 
   // Register exchange rate sync based on DB settings
   const currencySettings = await prisma.currencySettings.findUnique({
@@ -85,9 +101,9 @@ async function startWorkers() {
       {},
       { repeat: { pattern: cronExpression } },
     );
-    console.log(`✅ Exchange rate sync registered (${currencySettings.autoUpdateFreq})`);
+    console.log(`âœ… Exchange rate sync registered (${currencySettings.autoUpdateFreq})`);
   } else {
-    console.log("ℹ️  Exchange rate auto-sync disabled");
+    console.log("â„¹ï¸  Exchange rate auto-sync disabled");
   }
 
   // Graceful shutdown
@@ -111,7 +127,7 @@ async function startWorkers() {
     await prisma.$disconnect();
     await redis.quit();
 
-    console.log("✅ Workers shut down cleanly");
+    console.log("âœ… Workers shut down cleanly");
     process.exit(0);
   };
 
@@ -127,10 +143,10 @@ async function startWorkers() {
     },
   );
 
-  console.log("🚀 Workers running. Press Ctrl+C to stop.");
+  console.log("ðŸš€ Workers running. Press Ctrl+C to stop.");
 }
 
 startWorkers().catch((err) => {
-  console.error("❌ Worker startup failed:", err);
+  console.error("âŒ Worker startup failed:", err);
   process.exit(1);
 });
