@@ -4,9 +4,10 @@ import type { PrismaClient } from "@nexussmm/db";
 import type { OrderForwardJobData } from "@nexussmm/types";
 import { ProviderClient } from "../services/provider.service.js";
 import { refundOrderTx } from "../services/wallet.service.js";
+import { enqueueOrderCancelRetry } from "../services/cancel.service.js";
 import { Decimal } from "decimal.js";
 
-export function createOrderForwardWorker(redis: Redis, prisma: PrismaClient) {
+export function createOrderForwardWorker(redis: Redis, prisma: PrismaClient, queues: { orderCancel: { add: Function } }) {
   const worker = new Worker<OrderForwardJobData>(
     "order-forward",
     async (job: Job<OrderForwardJobData>) => {
@@ -123,13 +124,15 @@ export function createOrderForwardWorker(redis: Redis, prisma: PrismaClient) {
             try {
               const cancelResult = await primaryClient.cancelOrder(result.order.toString());
               if ("error" in cancelResult) {
-                console.warn(`[order-forward] Immediate cancel attempt returned error: ${cancelResult.error}. Status-poll will retry.`);
+                console.warn(`[order-forward] Immediate cancel attempt returned error: ${cancelResult.error}. Enqueuing cancel retry.`);
+                await enqueueOrderCancelRetry(queues, orderId);
               } else {
                 console.log(`[order-forward] Immediate provider cancel succeeded for ${orderId}.`);
                 // Status-poll will finalize CANCEL_REQUESTED -> CANCELLED + refund when it polls
               }
             } catch (cancelErr) {
               console.warn(`[order-forward] Immediate cancel attempt threw for ${orderId}:`, cancelErr);
+              await enqueueOrderCancelRetry(queues, orderId);
             }
           } else {
             console.log(`[order-forward] Order ${orderId} forwarded via PRIMARY -> ${result.order}`);
@@ -177,10 +180,14 @@ export function createOrderForwardWorker(redis: Redis, prisma: PrismaClient) {
                 try {
                   const cancelResult = await backupClient.cancelOrder(backupResult.order.toString());
                   if ("error" in cancelResult) {
-                    console.warn(`[order-forward] Backup immediate cancel error: ${cancelResult.error}`);
+                    console.warn(`[order-forward] Backup immediate cancel error: ${cancelResult.error}. Enqueuing cancel retry.`);
+                    await enqueueOrderCancelRetry(queues, orderId);
+                  } else {
+                    console.log(`[order-forward] Backup immediate cancel succeeded for ${orderId}.`);
                   }
                 } catch (cancelErr) {
                   console.warn(`[order-forward] Backup immediate cancel threw:`, cancelErr);
+                  await enqueueOrderCancelRetry(queues, orderId);
                 }
               } else {
                 console.log(`[order-forward] Order ${orderId} forwarded via BACKUP -> ${backupResult.order}`);

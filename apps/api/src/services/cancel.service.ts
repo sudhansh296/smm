@@ -24,11 +24,14 @@ async function loadFulfillmentProvider(prisma: PrismaClient, order: any) {
   return alt ?? order.service.provider;
 }
 
-// Fix #3: clear semantics  --  remains=0 means fully delivered, no refund
-function calcCancelRefund(costUsd: string, quantity: number, remains: number | undefined): Decimal {
+// Fix #4: remains is now a required number — callers must only call this with confirmed data.
+// remains >= quantity = nothing delivered = full refund
+// remains <= 0       = fully delivered = no refund
+// otherwise          = partial refund proportional to undelivered quantity
+function calcCancelRefund(costUsd: string, quantity: number, remains: number): Decimal {
   const total = new Decimal(costUsd);
-  if (remains === undefined || remains >= quantity) return total;        // unknown or nothing delivered
-  if (remains === 0)                                return new Decimal(0); // fully delivered
+  if (remains >= quantity) return total;          // nothing delivered = full refund
+  if (remains <= 0)        return new Decimal(0); // fully delivered = no refund
   return total.times(new Decimal(remains).dividedBy(quantity)).toDecimalPlaces(8);
 }
 
@@ -53,12 +56,13 @@ export async function enqueueOrderCancelRetry(
   }
 }
 
-// Fix 5: returns whether the transaction actually finalized the cancel
+// Fix 5: returns whether the transaction actually finalized the cancel.
+// remains is required — only called when we have confirmed delivery data.
 async function finaliseCancel(
   prisma: PrismaClient,
   orderId: string,
   order: any,
-  remains: number | undefined,
+  remains: number,
 ): Promise<FinaliseResult> {
   const refundAmount = calcCancelRefund(order.costUsd.toString(), order.quantity, remains);
 
@@ -143,36 +147,15 @@ export async function cancelOrder(
     if (order.providerOrderId) {
       const fwdProvider = await loadFulfillmentProvider(prisma, order);
       const cancelResult = await attemptProviderCancel(fwdProvider, order.providerOrderId);
-      if (cancelResult === "cancelled") {
-        // Fix 9: need confirmed remains before refunding  --  same as PROCESSING path
-        let fwdRemains: number | undefined;
-        let fwdFetchOk = false;
-        try {
-          const fwdClient = new ProviderClient(fwdProvider);
-          const fwdStatus = await fwdClient.getStatus(order.providerOrderId);
-          if (!("error" in fwdStatus) && fwdStatus.status !== undefined && fwdStatus.remains !== undefined) {
-            const parsed = Number(fwdStatus.remains);
-            if (
-              !isNaN(parsed) &&
-              Number.isInteger(parsed) &&
-              parsed >= 0 &&
-              parsed <= order.quantity
-            ) { fwdRemains = parsed; fwdFetchOk = true; }
-          }
-        } catch { /* network error  --  stay CANCEL_REQUESTED */ }
-        if (!fwdFetchOk) {
-          return { status: "CANCEL_REQUESTED", refunded: false, message: "Cancellation accepted. Refund calculated once delivery status confirmed." };
-        }
-        // Fix 5: check finalize result
-        const finalizeResult = await finaliseCancel(prisma, orderId, order, fwdRemains);
-        if (!finalizeResult.finalized) {
-          return {
-            status: "CANCEL_REQUESTED",
-            refunded: false,
-            message: `Order is now ${finalizeResult.blockedByStatus ?? "in a terminal state"} — cancellation not applied`,
-          };
-        }
-        return { status: "CANCELLED", refunded: true, message: "Order cancelled and refunded" };
+      if (cancelResult === "accepted") {
+        // cancel:1 = accepted, not confirmed cancelled
+        // Status-poll will finalize CANCEL_REQUESTED -> CANCELLED + refund when provider confirms
+        await enqueueOrderCancelRetry(queues, orderId);
+        return {
+          status: "CANCEL_REQUESTED",
+          refunded: false,
+          message: "Cancellation accepted by provider. Refund will be calculated once provider confirms the status.",
+        };
       }
       // Provider cancel failed in FORWARDING path — enqueue retry
       await enqueueOrderCancelRetry(queues, orderId);
@@ -257,62 +240,15 @@ export async function cancelOrder(
   const provider = await loadFulfillmentProvider(prisma, order);
   const providerResult = await attemptProviderCancel(provider, order.providerOrderId);
 
-  if (providerResult === "cancelled") {
-    // Fix #2: fetch fresh remains from fulfillment provider before refunding
-    // If status fetch fails (network error), remains is unknown.
-    // Unknown remains = we don't know how much was delivered = do NOT immediately refund.
-    // Stay CANCEL_REQUESTED and let status-poll finalize with confirmed data.
-    let freshRemains: number | undefined;
-    let statusFetchSuccess = false;
-    try {
-      const client = new ProviderClient(provider);
-      const freshStatus = await client.getStatus(order.providerOrderId);
-      // Fix: treat {error:...} response as unknown  --  do NOT use as confirmed data
-      if ("error" in freshStatus || freshStatus.status === undefined) {
-        console.warn(`[cancel-service] Fresh status returned error/invalid for ${orderId}:`, freshStatus);
-        // statusFetchSuccess stays false  --  will stay CANCEL_REQUESTED
-      } else if (freshStatus.remains === undefined || freshStatus.remains === null) {
-        // Fix 8: status OK but remains missing  --  still unknown, do not finalize refund
-        console.warn(`[cancel-service] Fresh status has no remains for ${orderId}  --  staying CANCEL_REQUESTED`);
-      } else {
-        const parsed = Number(freshStatus.remains);
-        if (
-          isNaN(parsed) ||
-          !Number.isInteger(parsed) ||
-          parsed < 0 ||
-          parsed > order.quantity
-        ) {
-          console.warn(`[cancel-service] Fresh status invalid remains (${parsed}) for ${orderId}  --  staying CANCEL_REQUESTED`);
-        } else {
-          freshRemains = parsed;
-          statusFetchSuccess = true;
-        }
-      }
-    } catch (err) {
-      console.warn(`[cancel-service] Fresh status fetch failed for ${orderId}:`, err);
-    }
-
-    if (!statusFetchSuccess) {
-      // Cannot determine how much was delivered  --  stay CANCEL_REQUESTED
-      // Status-poll will finalize with confirmed data when network recovers
-      console.warn(`[cancel-service] Order ${orderId}: cancel confirmed but status unknown  --  staying CANCEL_REQUESTED for safe poll`);
-      return {
-        status: "CANCEL_REQUESTED",
-        refunded: false,
-        message: "Cancellation accepted by provider. Refund will be calculated once delivery status is confirmed.",
-      };
-    }
-
-    // Fix 5: check finalize result
-    const finalizeResult = await finaliseCancel(prisma, orderId, order, freshRemains);
-    if (!finalizeResult.finalized) {
-      return {
-        status: "CANCEL_REQUESTED",
-        refunded: false,
-        message: `Order is now ${finalizeResult.blockedByStatus ?? "in a terminal state"} — cancellation not applied`,
-      };
-    }
-    return { status: "CANCELLED", refunded: true, message: "Order cancelled and refunded" };
+  if (providerResult === "accepted") {
+    // cancel:1 = accepted, not confirmed cancelled.
+    // Status-poll will finalize CANCEL_REQUESTED -> CANCELLED + refund when provider reports terminal status.
+    await enqueueOrderCancelRetry(queues, orderId);
+    return {
+      status: "CANCEL_REQUESTED",
+      refunded: false,
+      message: "Cancellation accepted by provider. Refund will be calculated once provider confirms the status.",
+    };
   }
 
   // Fix 1: provider cancel failed — enqueue retry job
@@ -320,7 +256,7 @@ export async function cancelOrder(
   return { status: "CANCEL_REQUESTED", refunded: false, message: "Cancellation requested. Refund will be issued once provider confirms." };
 }
 
-async function attemptProviderCancel(provider: any, providerOrderId: string): Promise<"cancelled" | "failed"> {
+async function attemptProviderCancel(provider: any, providerOrderId: string): Promise<"accepted" | "failed"> {
   try {
     const client = new ProviderClient(provider);
     const result = await client.cancelOrder(providerOrderId);
@@ -328,7 +264,7 @@ async function attemptProviderCancel(provider: any, providerOrderId: string): Pr
       console.warn(`[cancel-service] Provider cancel error: ${result.error}`);
       return "failed";
     }
-    if ("cancel" in result && result.cancel === 1) return "cancelled";
+    if ("cancel" in result && result.cancel === 1) return "accepted";
     console.warn("[cancel-service] Unexpected provider cancel response:", result);
     return "failed";
   } catch (err) {

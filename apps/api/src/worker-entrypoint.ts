@@ -26,7 +26,7 @@ async function startWorkers() {
 
   const queues = createQueues(redis);
 
-  const orderForwardWorker  = createOrderForwardWorker(redis, prisma);
+  const orderForwardWorker  = createOrderForwardWorker(redis, prisma, queues);
   const statusPollWorker    = createStatusPollWorker(redis, prisma);
   const refillWorker        = createRefillWorker(redis, prisma);
   const exchangeRateWorker       = createExchangeRateWorker(redis, prisma);

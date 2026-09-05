@@ -42,8 +42,9 @@ export default function LoginPage() {
   // Show error from OAuth redirect
   useEffect(() => {
     const error = searchParams.get("error");
-    if (error === "oauth_failed") toast.error("Google sign-in failed. Please try again.");
-    if (error === "suspended")    toast.error("Your account has been suspended.");
+    if (error === "oauth_failed")  toast.error("Google sign-in failed. Please try again.");
+    if (error === "suspended")     toast.error("Your account has been suspended.");
+    if (error === "email_exists")  toast.error("An account with this email already exists. Please sign in with email and password.");
   }, [searchParams]);
 
   const onSubmit = async (data: F) => {

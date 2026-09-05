@@ -18,6 +18,7 @@ export default async function googleAuthRoute(fastify: FastifyInstance) {
   }
 
   // Register OAuth2 plugin
+  // startRedirectPath is relative to this plugin's prefix (/auth), so /google -> /auth/google
   await fastify.register(oauth2Plugin, {
     name:        "googleOAuth2",
     scope:       ["profile", "email"],
@@ -25,12 +26,13 @@ export default async function googleAuthRoute(fastify: FastifyInstance) {
       client: { id: clientId, secret: clientSecret },
       auth:   oauth2Plugin.GOOGLE_CONFIGURATION,
     },
-    startRedirectPath: "/auth/google",
-    callbackUri:       callbackUrl,
+    startRedirectPath: "/google",
+    callbackUri:       callbackUrl,  // full URL from env, e.g. http://localhost:3001/auth/google/callback
+    pkce:              "S256",
   });
 
-  // Callback endpoint -- Google redirects here
-  fastify.get("/auth/google/callback", async (request, reply) => {
+  // Callback endpoint -- Google redirects here (registered under /auth prefix -> /auth/google/callback)
+  fastify.get("/google/callback", async (request, reply) => {
     try {
       const tokenResponse = await (fastify as any).googleOAuth2.getAccessTokenFromAuthorizationCodeFlow(request);
       const accessToken   = tokenResponse.token.access_token as string;
@@ -56,22 +58,26 @@ export default async function googleAuthRoute(fastify: FastifyInstance) {
       if (user) {
         if (user.isSuspended) return reply.redirect(`${frontendUrl}/login?error=suspended`);
 
-        // Link Google account if not already linked
         const linked = await fastify.prisma.oAuthAccount.findUnique({
           where: { provider_providerUserId: { provider: "google", providerUserId: googleUser.id } },
         });
+
         if (!linked) {
+          // If user registered with email+password, don't silently link Google
+          if (user.passwordHash) {
+            return reply.redirect(`${frontendUrl}/login?error=email_exists`);
+          }
           await fastify.prisma.oAuthAccount.create({
             data: { userId: user.id, provider: "google", providerUserId: googleUser.id },
           });
         }
       } else {
-        // Create new user -- email pre-verified via Google
+        // Create new user -- email verified status from Google
         user = await fastify.prisma.user.create({
           data: {
             email,
             displayName:    googleUser.name ?? email.split("@")[0],
-            emailVerified:  true,
+            emailVerified:  googleUser.verified_email === true,
             oauthAccounts:  {
               create: { provider: "google", providerUserId: googleUser.id },
             },
@@ -91,10 +97,10 @@ export default async function googleAuthRoute(fastify: FastifyInstance) {
         data: { userId: user.id, tokenHash, expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) },
       });
 
-      // Set HttpOnly cookies (same as email login)
+      // Set HttpOnly cookies
       const isProd = process.env["NODE_ENV"] === "production";
-      reply.setCookie("refreshToken", rawRefresh, { httpOnly: true, secure: isProd, sameSite: "lax", path: "/", maxAge: 7 * 24 * 60 * 60 });
-      reply.setCookie("accessToken",  jwtToken,   { httpOnly: true, secure: isProd, sameSite: "lax", path: "/", maxAge: 900 });
+      reply.setCookie("refreshToken", rawRefresh, { httpOnly: true, secure: isProd, sameSite: "strict", path: "/", maxAge: 7 * 24 * 60 * 60 });
+      reply.setCookie("accessToken",  jwtToken,   { httpOnly: true, secure: isProd, sameSite: "lax",    path: "/", maxAge: 900 });
 
       return reply.redirect(`${frontendUrl}/dashboard`);
 
