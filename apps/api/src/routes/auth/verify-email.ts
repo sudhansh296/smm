@@ -47,7 +47,7 @@ export default async function verifyEmailRoute(fastify: FastifyInstance) {
   fastify.post("/resend-verification", async (request, reply) => {
     const { email } = z.object({ email: z.string().email() }).parse(request.body);
 
-    const user = await fastify.prisma.user.findUnique({ where: { email: email.toLowerCase() } });
+    const user = await fastify.prisma.user.findUnique({ where: { email: email.trim().toLowerCase() } });
 
     if (!user || user.emailVerified) {
       return reply.send({ message: "If this email is registered, a verification link has been sent." });

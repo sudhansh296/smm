@@ -12,7 +12,7 @@ function hashToken(token: string): string {
 export default async function passwordResetRoute(fastify: FastifyInstance) {
   fastify.post("/forgot-password", async (request, reply) => {
     const { email } = z.object({ email: z.string().email() }).parse(request.body);
-    const user = await fastify.prisma.user.findUnique({ where: { email: email.toLowerCase() } });
+    const user = await fastify.prisma.user.findUnique({ where: { email: email.trim().toLowerCase() } });
 
     if (user) {
       await fastify.prisma.passwordReset.updateMany({

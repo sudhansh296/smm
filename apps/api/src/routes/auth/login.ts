@@ -28,7 +28,7 @@ export default async function loginRoute(fastify: FastifyInstance) {
     if (!parsed.success) throw new ValidationError("Invalid credentials");
 
     const { email, password, totpCode } = parsed.data;
-    const lowerEmail = email.toLowerCase();
+    const lowerEmail = email.trim().toLowerCase();
 
     // Check account lockout
     const lockKey = `session:lock:${lowerEmail}`;

@@ -48,7 +48,7 @@ export default async function registerRoute(fastify: FastifyInstance) {
     }
 
     const { email, displayName, password } = parsed.data;
-    const lowerEmail = email.toLowerCase();
+    const lowerEmail = email.trim().toLowerCase();
 
     const existing = await fastify.prisma.user.findUnique({ where: { email: lowerEmail } });
     if (existing) throw new ConflictError("An account with this email already exists");
@@ -56,7 +56,7 @@ export default async function registerRoute(fastify: FastifyInstance) {
     const passwordHash = await hashPassword(password);
 
     const user = await fastify.prisma.user.create({
-      data: { email: lowerEmail, displayName, passwordHash, walletBalance: 0 },
+      data: { email: lowerEmail, displayName: displayName.trim(), passwordHash, walletBalance: 0 },
     });
 
     // Fix #1: use shared helper — stores SHA-256 hash, sends raw token in email
