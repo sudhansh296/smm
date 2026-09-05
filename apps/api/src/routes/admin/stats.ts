@@ -1,4 +1,4 @@
-﻿import type { FastifyInstance } from "fastify";
+import type { FastifyInstance } from "fastify";
 import { Decimal } from "decimal.js";
 
 export default async function adminStatsRoute(fastify: FastifyInstance) {

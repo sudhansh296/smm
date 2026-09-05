@@ -22,6 +22,7 @@ export function formatBalance(usd: string, inr: string): string {
 export function getStatusColor(status: string): string {
   const map: Record<string, string> = {
     PENDING: "bg-yellow-100 text-yellow-800",
+    FORWARDING: "bg-yellow-100 text-yellow-800",
     FORWARDING: "bg-blue-50 text-blue-600",
     PROCESSING: "bg-blue-100 text-blue-800",
     IN_PROGRESS: "bg-indigo-100 text-indigo-800",

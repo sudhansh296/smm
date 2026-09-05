@@ -13,6 +13,19 @@ import { toast } from "sonner";
 
 const STATUSES = ["ALL", "PENDING", "PROCESSING", "IN_PROGRESS", "COMPLETED", "PARTIAL", "CANCEL_REQUESTED", "CANCELLED", "REFUNDED"];
 
+// Friendly display labels for internal statuses
+const STATUS_LABELS: Record<string, string> = {
+  FORWARDING:       "Placed",
+  PENDING:          "Placed",
+  PROCESSING:       "Processing",
+  IN_PROGRESS:      "In Progress",
+  COMPLETED:        "Completed",
+  PARTIAL:          "Partial",
+  CANCEL_REQUESTED: "Cancelling",
+  CANCELLED:        "Cancelled",
+  REFUNDED:         "Refunded",
+};
+
 export default function OrdersPage() {
   const [status, setStatus] = useState("ALL");
   const [page, setPage] = useState(1);
@@ -84,7 +97,7 @@ export default function OrdersPage() {
                         {order.categoryName}
                       </Badge>
                       <Badge className={`text-xs ${getStatusColor(order.status)}`}>
-                        {order.status}
+                        {STATUS_LABELS[order.status] ?? order.status}
                       </Badge>
                     </div>
                     <p className="text-xs text-muted-foreground truncate max-w-[200px] sm:max-w-xs">

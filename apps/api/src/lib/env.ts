@@ -1,4 +1,4 @@
-﻿import { z } from "zod";
+import { z } from "zod";
 import { config } from "dotenv";
 import { resolve } from "path";
 import { fileURLToPath } from "url";

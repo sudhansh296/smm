@@ -1,4 +1,4 @@
-﻿import type { FastifyInstance } from "fastify";
+import type { FastifyInstance } from "fastify";
 import adminProvidersRoute from "./providers.js";
 import adminServicesRoute from "./services.js";
 import adminUsersRoute from "./users.js";

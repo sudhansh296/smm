@@ -1,4 +1,4 @@
-﻿import type { FastifyInstance } from "fastify";
+import type { FastifyInstance } from "fastify";
 // Razorpay SDK loaded conditionally
 import { z } from "zod";
 import { createHmac } from "crypto";

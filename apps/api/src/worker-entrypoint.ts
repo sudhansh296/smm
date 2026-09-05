@@ -1,4 +1,4 @@
-import "./lib/env.js"; // Validate env first
+﻿import "./lib/env.js"; // Validate env first
 import { PrismaClient } from "@nexussmm/db";
 import { Redis } from "ioredis";
 import { createQueues } from "@nexussmm/queue";
@@ -10,18 +10,18 @@ import { createRefillWorker } from "./workers/refill.worker.js";
 import { createExchangeRateWorker } from "./workers/exchange-rate.worker.js";
 
 async function startWorkers() {
-  console.log("Ã°Å¸â€Â§ Starting NexusSMM Workers...");
+  console.log("[workers] Starting NexusSMM Workers...");
 
   // Connect to services
   const prisma = new PrismaClient();
   await prisma.$connect();
-  console.log("Ã¢Å“â€¦ PostgreSQL connected");
+  console.log("[workers] PostgreSQL connected");
 
   const redis = new Redis(env.REDIS_URL, {
     maxRetriesPerRequest: null, // Required for BullMQ
     enableReadyCheck: false,
   });
-  console.log("Ã¢Å“â€¦ Redis connected");
+  console.log("[workers] Redis connected");
 
   const queues = createQueues(redis);
 
@@ -31,9 +31,9 @@ async function startWorkers() {
   const refillWorker = createRefillWorker(redis, prisma);
   const exchangeRateWorker = createExchangeRateWorker(redis, prisma);
 
-  console.log("Ã¢Å“â€¦ All workers started");
+  console.log("[workers] All workers started");
 
-  // Bug 4: Recovery Ã¢â‚¬â€ re-enqueue PENDING orders older than 5 min with no providerOrderId
+  // Bug 4: Recovery — re-enqueue PENDING orders older than 5 min with no providerOrderId
   // This handles the case where Redis was down after DB commit (job was lost)
   async function recoverPendingOrders() {
     try {
@@ -86,13 +86,13 @@ async function startWorkers() {
     }, 2 * 60 * 1000);
   }, 5000);
 
-  // Register repeatable status poll job Ã¢â‚¬â€ every 2 minutes
+  // Register repeatable status poll job — every 2 minutes
   await queues.statusPoll.add(
     "poll-all-open-orders",
     {},
     { repeat: { every: 120_000 } },
   );
-  console.log("Ã¢Å“â€¦ Status poll job registered (every 2 min)");
+  console.log("[workers] Status poll job registered (every 2 min)");
 
   // Register exchange rate sync based on DB settings
   const currencySettings = await prisma.currencySettings.findUnique({
@@ -108,9 +108,9 @@ async function startWorkers() {
       {},
       { repeat: { pattern: cronExpression } },
     );
-    console.log(`Ã¢Å“â€¦ Exchange rate sync registered (${currencySettings.autoUpdateFreq})`);
+    console.log(` Exchange rate sync registered (${currencySettings.autoUpdateFreq})`);
   } else {
-    console.log("Ã¢â€žÂ¹Ã¯Â¸Â  Exchange rate auto-sync disabled");
+  console.log("[workers] Exchange rate auto-sync disabled");
   }
 
   // Graceful shutdown
@@ -134,7 +134,7 @@ async function startWorkers() {
     await prisma.$disconnect();
     await redis.quit();
 
-    console.log("Ã¢Å“â€¦ Workers shut down cleanly");
+    console.log("[workers] Workers shut down cleanly");
     process.exit(0);
   };
 
@@ -150,7 +150,7 @@ async function startWorkers() {
     },
   );
 
-  console.log("Ã°Å¸Å¡â‚¬ Workers running. Press Ctrl+C to stop.");
+  console.log("[workers] Workers running. Press Ctrl+C to stop.");
 }
 
 startWorkers().catch((err) => {

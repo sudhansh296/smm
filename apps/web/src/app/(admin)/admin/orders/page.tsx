@@ -12,7 +12,8 @@ import { formatUsd, formatDate, getStatusColor } from "@/lib/utils";
 import { toast } from "sonner";
 import { RefreshCw, Search, RotateCcw, X } from "lucide-react";
 
-const STATUSES = ["ALL","PENDING","PROCESSING","IN_PROGRESS","COMPLETED","PARTIAL","CANCELLED","REFUNDED"];
+const STATUSES = ["ALL","PENDING","FORWARDING","PROCESSING","IN_PROGRESS","COMPLETED","PARTIAL","CANCEL_REQUESTED","CANCELLED","REFUNDED"];
+const STATUS_LABELS: Record<string,string> = { FORWARDING:"Placed", PENDING:"Placed", PROCESSING:"Processing", IN_PROGRESS:"In Progress", COMPLETED:"Completed", PARTIAL:"Partial", CANCEL_REQUESTED:"Cancelling", CANCELLED:"Cancelled", REFUNDED:"Refunded" };
 
 // Confirmation dialog for refund
 function RefundDialog({
@@ -232,7 +233,7 @@ export default function AdminOrdersPage() {
                     <td className="px-4 py-3 text-right">{o.quantity?.toLocaleString()}</td>
                     <td className="px-4 py-3 text-right font-medium">{formatUsd(o.costUsd)}</td>
                     <td className="px-4 py-3 text-center">
-                      <Badge className={getStatusColor(o.status)}>{o.status}</Badge>
+                      <Badge className={getStatusColor(o.status)}>{STATUS_LABELS[o.status] ?? o.status}</Badge>
                     </td>
                     <td className="px-4 py-3 text-xs text-muted-foreground">{formatDate(o.createdAt)}</td>
                     <td className="px-4 py-3">

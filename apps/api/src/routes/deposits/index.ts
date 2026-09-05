@@ -1,4 +1,4 @@
-﻿import type { FastifyInstance } from "fastify";
+import type { FastifyInstance } from "fastify";
 import razorpayDeposit from "./razorpay.js";
 import cryptomusDeposit from "./cryptomus.js";
 import manualInrDeposit from "./manual-inr.js";
