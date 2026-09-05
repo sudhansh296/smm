@@ -96,6 +96,12 @@ export class ProviderClient {
     }) as Promise<{ cancel: number } | { error: string }>;
   }
 
+  async getRefillStatus(refillId: string): Promise<{ refill: string | number; status?: string; error?: string } | { error: string }> {
+    return this.post({ action: "refill_status", refill: refillId }) as Promise<
+      { refill: string | number; status?: string; error?: string } | { error: string }
+    >;
+  }
+
   async testConnectivity(): Promise<boolean> {
     try {
       const data = await this.post({ action: "services" });

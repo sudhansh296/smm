@@ -115,9 +115,17 @@ export async function cancelOrder(
     return { status: "CANCEL_REQUESTED", refunded: false, message: `Order in ${fresh.status} — cancellation requested` };
   }
 
-  // PROCESSING/IN_PROGRESS without providerOrderId
+  // PROCESSING/IN_PROGRESS without providerOrderId — unusual state, safe to cancel
   if (!order.providerOrderId) {
-    await prisma.$transaction(async (tx) => {
+    // Fix 4: row lock + re-read before acting — another worker may have set providerOrderId
+    const didCancel = await prisma.$transaction(async (tx) => {
+      const locked = await tx.$queryRaw<Array<{ status: string; providerOrderId: string | null }>>`
+        SELECT status, "providerOrderId" FROM orders WHERE id = ${orderId} FOR UPDATE
+      `;
+      // If providerOrderId appeared or status changed, abort — let caller handle
+      if (!locked[0] || locked[0].providerOrderId || !["PROCESSING","IN_PROGRESS"].includes(locked[0].status)) {
+        return false;
+      }
       await tx.order.update({ where: { id: orderId }, data: { status: "CANCELLED" } });
       await refundOrderTx(tx as Parameters<typeof refundOrderTx>[0], orderId, {
         userId: order.userId,
@@ -126,8 +134,11 @@ export async function cancelOrder(
         description: `Refund: order #${orderId.slice(-8)} cancelled`,
       });
       await tx.notification.create({ data: { userId: order.userId, message: `Order #${orderId.slice(-8)} cancelled. $${new Decimal(order.costUsd.toString()).toFixed(2)} refunded.` } });
+      return true;
     });
-    return { status: "CANCELLED", refunded: true, message: "Order cancelled and refunded" };
+    if (didCancel) return { status: "CANCELLED", refunded: true, message: "Order cancelled and refunded" };
+    // providerOrderId appeared or status changed — fall through to normal cancel flow
+    return cancelOrder(prisma, orderId, requestingUserId, isAdmin);
   }
 
   // Fix #5: if service doesn't support cancel, reject when provider has the order
@@ -223,6 +234,11 @@ async function finaliseCancel(
   const refundAmount = calcCancelRefund(order.costUsd.toString(), order.quantity, remains);
 
   await prisma.$transaction(async (tx) => {
+    // Fix 4: verify order is still in a cancellable state before overwriting
+    const current = await tx.$queryRaw<Array<{ status: string }>>`
+      SELECT status FROM orders WHERE id = ${orderId} FOR UPDATE
+    `;
+    if (!current[0] || current[0].status === "CANCELLED") return; // already done
     await tx.order.update({ where: { id: orderId }, data: { status: "CANCELLED" } });
     if (refundAmount.greaterThan(0)) {
       // Fix #1: only catch AlreadyRefundedError — real errors propagate and rollback transaction

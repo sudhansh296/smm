@@ -74,7 +74,14 @@ export function createStatusPollWorker(redis: Redis, prisma: PrismaClient) {
                 // Fix 10: missing remains from provider = unknown, not 0
                 // 0 = "fully delivered = no refund" — financial decision we need confirmation for
                 const rawRemains   = data.remains !== undefined ? Number(data.remains) : null;
-                const remainsKnown = rawRemains !== null && !isNaN(rawRemains);
+                // Fix 5: validate remains — must be integer in [0, quantity]
+                const remainsKnown = (
+                  rawRemains !== null &&
+                  !isNaN(rawRemains) &&
+                  Number.isInteger(rawRemains) &&
+                  rawRemains >= 0 &&
+                  rawRemains <= order.quantity
+                );
                 const remains      = remainsKnown ? rawRemains! : (order.remains ?? 0);
                 const startCount   = (data.start_count !== null && data.start_count !== undefined)
                   ? Number(data.start_count) : order.startCount;

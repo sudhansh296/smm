@@ -6,7 +6,7 @@
   "main": "./dist/server.js",
   "scripts": {
     "dev": "tsx --tsconfig tsconfig.json watch src/server.ts",
-    "dev:worker": "cross-env WORKER_MODE=true tsx --tsconfig tsconfig.json src/worker-entrypoint.ts",
+    "dev:worker": "tsx --tsconfig tsconfig.json watch src/worker-entrypoint.ts",
     "build": "tsc",
     "start": "node dist/server.js",
     "start:worker": "node dist/worker-entrypoint.js",
