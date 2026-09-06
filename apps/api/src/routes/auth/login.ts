@@ -81,7 +81,10 @@ export default async function loginRoute(fastify: FastifyInstance) {
     }
 
     if (!user.emailVerified) {
-      throw new UnauthorizedError("Please verify your email before logging in");
+      return reply.status(401).send({
+        error: "Please verify your email before logging in",
+        code:  "EMAIL_NOT_VERIFIED",
+      });
     }
 
     // TOTP check

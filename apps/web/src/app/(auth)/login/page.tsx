@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useAuth } from "@/hooks/useAuth";
+import { api, getErrorMessage } from "@/lib/api";
 import { toast } from "sonner";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
@@ -33,12 +34,13 @@ function GoogleIcon() {
   );
 }
 
-// Inner component uses useSearchParams -- must be inside Suspense
 function LoginForm() {
   const { loginAsync, isLoggingIn } = useAuth();
   const [requiresTotp, setRequiresTotp] = useState(false);
+  const [unverifiedEmail, setUnverifiedEmail] = useState<string | null>(null);
+  const [resendLoading, setResendLoading] = useState(false);
   const searchParams = useSearchParams();
-  const { register, handleSubmit, formState: { errors } } = useForm<F>({ resolver: zodResolver(schema) });
+  const { register, handleSubmit, formState: { errors }, getValues } = useForm<F>({ resolver: zodResolver(schema) });
 
   useEffect(() => {
     const error = searchParams.get("error");
@@ -51,7 +53,28 @@ function LoginForm() {
     try {
       const r = await loginAsync(data as { email: string; password: string; totpCode?: string });
       if (r.requiresTotpCode) setRequiresTotp(true);
-    } catch { /* handled in hook */ }
+    } catch (err: any) {
+      // Check for EMAIL_NOT_VERIFIED error code
+      const code = err?.response?.data?.code;
+      if (code === "EMAIL_NOT_VERIFIED") {
+        setUnverifiedEmail(data.email);
+      }
+    }
+  };
+
+  const handleResend = async () => {
+    const email = unverifiedEmail ?? getValues("email");
+    if (!email) return;
+    setResendLoading(true);
+    try {
+      await api.post("/auth/resend-verification", { email });
+      toast.success("Verification email sent! Check your inbox.");
+      setUnverifiedEmail(null);
+    } catch (err) {
+      toast.error(getErrorMessage(err));
+    } finally {
+      setResendLoading(false);
+    }
   };
 
   return (
@@ -64,6 +87,28 @@ function LoginForm() {
         <CardDescription>Sign in to your NexusSMM account</CardDescription>
       </CardHeader>
       <CardContent>
+
+        {/* Email not verified banner */}
+        {unverifiedEmail && (
+          <div className="mb-4 rounded-lg border border-yellow-200 bg-yellow-50 p-4 space-y-3">
+            <p className="text-sm text-yellow-800 font-medium">Email not verified</p>
+            <p className="text-xs text-yellow-700">
+              Please verify <strong>{unverifiedEmail}</strong> before logging in.
+              Check your inbox or resend the verification email.
+            </p>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="w-full border-yellow-300 text-yellow-800 hover:bg-yellow-100"
+              onClick={handleResend}
+              disabled={resendLoading}
+            >
+              {resendLoading ? "Sending..." : "Resend Verification Email"}
+            </Button>
+          </div>
+        )}
+
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
           <div className="space-y-1.5">
             <Label htmlFor="email">Email</Label>
