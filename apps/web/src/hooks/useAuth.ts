@@ -18,17 +18,22 @@ export function useAuth() {
         accessToken: string;
         user: UserProfile;
         requiresTotpCode?: boolean;
+        code?: string;
       }>("/auth/login", data);
       return res.data;
     },
     onSuccess: (data) => {
-      if (data.requiresTotpCode) return; // handled by caller
-      // Access token is now HttpOnly cookie  --  no need to store it in JS
-      setAuth(data.user, ""); // store user profile only; token is in HttpOnly cookie
+      if (data.requiresTotpCode) return;
+      setAuth(data.user, "");
       toast.success("Logged in successfully");
       router.push("/dashboard");
     },
-    onError: (err) => toast.error(getErrorMessage(err)),
+    onError: (err: any) => {
+      // EMAIL_NOT_VERIFIED is handled by login page — don't show generic toast
+      const code = err?.response?.data?.code;
+      if (code === "EMAIL_NOT_VERIFIED") return;
+      toast.error(getErrorMessage(err));
+    },
   });
 
   const registerMutation = useMutation({
@@ -48,7 +53,6 @@ export function useAuth() {
       await api.post("/auth/logout");
     },
     onSuccess: () => {
-      // Server clears HttpOnly cookies on logout
       clearAuth();
       queryClient.clear();
       window.location.replace("/login");

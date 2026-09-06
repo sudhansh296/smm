@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -9,6 +10,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useAuth } from "@/hooks/useAuth";
+import { api, getErrorMessage } from "@/lib/api";
+import { toast } from "sonner";
+import { Mail } from "lucide-react";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
 
@@ -17,7 +21,10 @@ const schema = z.object({
   email:           z.string().email("Invalid email"),
   password:        z.string().min(8, "Min 8 characters"),
   confirmPassword: z.string(),
-}).refine((d) => d.password === d.confirmPassword, { message: "Passwords do not match", path: ["confirmPassword"] });
+}).refine((d) => d.password === d.confirmPassword, {
+  message: "Passwords do not match",
+  path: ["confirmPassword"],
+});
 type F = z.infer<typeof schema>;
 
 function GoogleIcon() {
@@ -33,8 +40,81 @@ function GoogleIcon() {
 
 export default function RegisterPage() {
   const { register: registerUser, isRegistering } = useAuth();
-  const { register, handleSubmit, formState: { errors } } = useForm<F>({ resolver: zodResolver(schema) });
-  const onSubmit = (d: F) => registerUser({ email: d.email, displayName: d.displayName, password: d.password });
+  const [registeredEmail, setRegisteredEmail] = useState<string | null>(null);
+  const [resendLoading, setResendLoading] = useState(false);
+
+  const { register, handleSubmit, formState: { errors } } = useForm<F>({
+    resolver: zodResolver(schema),
+  });
+
+  const onSubmit = async (d: F) => {
+    try {
+      await new Promise<void>((resolve, reject) => {
+        registerUser(
+          { email: d.email, displayName: d.displayName, password: d.password },
+          {
+            onSuccess: () => { setRegisteredEmail(d.email); resolve(); },
+            onError: (err) => reject(err),
+          }
+        );
+      });
+    } catch { /* handled by mutation */ }
+  };
+
+  const handleResend = async () => {
+    if (!registeredEmail) return;
+    setResendLoading(true);
+    try {
+      await api.post("/auth/resend-verification", { email: registeredEmail });
+      toast.success("Verification email resent! Check your inbox.");
+    } catch (err) {
+      toast.error(getErrorMessage(err));
+    } finally {
+      setResendLoading(false);
+    }
+  };
+
+  // Show success screen after registration
+  if (registeredEmail) {
+    return (
+      <Card className="shadow-lg">
+        <CardContent className="pt-8 pb-8 text-center space-y-5">
+          <div className="mx-auto w-16 h-16 bg-green-100 rounded-full flex items-center justify-center">
+            <Mail className="h-8 w-8 text-green-600" />
+          </div>
+          <div className="space-y-2">
+            <h2 className="text-xl font-bold">Check your email</h2>
+            <p className="text-sm text-muted-foreground">
+              We sent a verification link to
+            </p>
+            <p className="font-semibold text-primary">{registeredEmail}</p>
+            <p className="text-sm text-muted-foreground">
+              Click the link in the email to verify your account, then you can log in.
+            </p>
+          </div>
+
+          <div className="rounded-lg border border-blue-100 bg-blue-50 p-3 text-xs text-blue-800 text-left space-y-1">
+            <p className="font-medium">Did not receive the email?</p>
+            <p>Check spam/junk folder or resend below.</p>
+          </div>
+
+          <div className="space-y-2">
+            <Button
+              variant="outline"
+              className="w-full"
+              onClick={handleResend}
+              disabled={resendLoading}
+            >
+              {resendLoading ? "Sending..." : "Resend Verification Email"}
+            </Button>
+            <Button asChild variant="ghost" className="w-full">
+              <Link href="/login">Back to Login</Link>
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
 
   return (
     <Card className="shadow-lg">
