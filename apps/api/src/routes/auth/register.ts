@@ -36,7 +36,7 @@ export async function createEmailVerificationToken(
 
 const schema = z.object({
   email: z.string().trim().toLowerCase().email("Invalid email"),
-  displayName: z.string().min(2).max(50),
+  displayName: z.string().trim().min(2, "Name must be at least 2 characters").max(50),
   password: z.string().min(8, "Password must be at least 8 characters").max(128),
 });
 

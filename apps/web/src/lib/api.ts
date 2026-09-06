@@ -30,7 +30,11 @@ api.interceptors.response.use(
 
     // Pass through known auth errors that the UI handles directly
     const errCode = (error.response?.data as any)?.code;
-    if (errCode === "EMAIL_NOT_VERIFIED") {
+    const requestUrl = original?.url ?? "";
+    if (
+      errCode === "EMAIL_NOT_VERIFIED" ||
+      requestUrl.includes("/auth/login")
+    ) {
       return Promise.reject(error);
     }
 

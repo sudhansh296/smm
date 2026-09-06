@@ -17,7 +17,7 @@ import { Mail } from "lucide-react";
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
 
 const schema = z.object({
-  displayName:     z.string().min(2, "Min 2 characters"),
+  displayName:     z.string().trim().min(2, "Min 2 characters"),
   email:           z.string().email("Invalid email"),
   password:        z.string().min(8, "Min 8 characters"),
   confirmPassword: z.string(),
