@@ -43,7 +43,6 @@ export function useAuth() {
     },
     onSuccess: () => {
       toast.success("Account created! Please check your email to verify.");
-      router.push("/login");
     },
     onError: (err) => toast.error(getErrorMessage(err)),
   });
