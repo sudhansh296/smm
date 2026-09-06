@@ -20,7 +20,7 @@ export default async function userOrdersRoute(fastify: FastifyInstance) {
     const [orders, total] = await Promise.all([
       fastify.prisma.order.findMany({
         where, orderBy: { createdAt: "desc" }, skip, take: q.limit,
-        include: { service: { select: { name: true, supportsRefill: true, category: { select: { name: true } } } } },
+        include: { service: { select: { name: true, supportsRefill: true, supportsCancel: true, category: { select: { name: true } } } } },
       }),
       fastify.prisma.order.count({ where }),
     ]);
@@ -34,6 +34,7 @@ export default async function userOrdersRoute(fastify: FastifyInstance) {
         inrRateAtOrder: o.inrRateAtOrder.toString(), status: o.status,
         providerOrderId: o.providerOrderId, startCount: o.startCount, remains: o.remains,
         supportsRefill: o.service.supportsRefill,
+        supportsCancel: o.service.supportsCancel,
         refillRequestedAt: o.refillRequestedAt?.toISOString() ?? null,
         refillStatus: o.refillStatus,
         createdAt: o.createdAt.toISOString(), updatedAt: o.updatedAt.toISOString(),

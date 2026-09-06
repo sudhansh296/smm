@@ -18,6 +18,7 @@ export default fp(async (fastify: FastifyInstance) => {
       queues.statusPoll.close(),
       queues.refill.close(),
       queues.exchangeRateSync.close(),
+      queues.orderCancel.close(),
     ]);
   });
 });

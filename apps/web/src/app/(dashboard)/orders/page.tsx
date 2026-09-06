@@ -83,7 +83,7 @@ export default function OrdersPage() {
           {data.orders.map((order: {
             id: string; serviceName: string; categoryName: string; link: string;
             quantity: number; costUsd: string; costInr: string; status: string;
-            remains: number | null; supportsRefill: boolean; createdAt: string;
+            remains: number | null; supportsRefill: boolean; supportsCancel: boolean; createdAt: string;
           }) => (
             <Card key={order.id}>
               <CardContent className="p-4">
@@ -118,7 +118,8 @@ export default function OrdersPage() {
                     <p className="text-xs text-muted-foreground">{formatDate(order.createdAt)}</p>
                   </div>
                   <div className="flex flex-col sm:flex-row gap-1.5 shrink-0">
-                    {["PENDING", "FORWARDING", "PROCESSING", "IN_PROGRESS"].includes(order.status) && (
+                    {(["PENDING", "FORWARDING"].includes(order.status) ||
+                      (["PROCESSING", "IN_PROGRESS"].includes(order.status) && order.supportsCancel)) && (
                       <Button size="sm" variant="outline"
                         onClick={() => cancelMutation.mutate(order.id)}
                         disabled={cancelMutation.isPending}

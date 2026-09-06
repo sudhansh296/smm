@@ -72,9 +72,10 @@ export default async function cryptomusDepositRoute(fastify: FastifyInstance) {
         data: {
           userId: request.user.sub,
           gateway: "cryptomus",
+          method: "CRYPTOMUS",  // Fix 3: explicit method for consistent filtering
           amountUsdt,
           gatewayOrderId: data.result.uuid,
-        },
+        } as any,
       });
 
       return reply.send({

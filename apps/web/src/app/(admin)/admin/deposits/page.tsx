@@ -13,8 +13,8 @@ import { toast } from "sonner";
 import { CheckCircle, XCircle, X } from "lucide-react";
 
 const STATUS_COLORS: Record<string,string> = { PENDING:"bg-yellow-100 text-yellow-800", COMPLETED:"bg-green-100 text-green-800", FAILED:"bg-red-100 text-red-800" };
-const METHOD_COLORS: Record<string,string> = { RAZORPAY:"bg-blue-100 text-blue-800", MANUAL_INR:"bg-indigo-100 text-indigo-800", cryptomus:"bg-purple-100 text-purple-800", MANUAL_USDT:"bg-orange-100 text-orange-800" };
-const METHOD_LABELS: Record<string,string> = { RAZORPAY:"Razorpay", MANUAL_INR:"Manual INR", cryptomus:"Cryptomus", MANUAL_USDT:"Manual USDT", AUTO:"Auto" };
+const METHOD_COLORS: Record<string,string> = { RAZORPAY:"bg-blue-100 text-blue-800", MANUAL_INR:"bg-indigo-100 text-indigo-800", CRYPTOMUS:"bg-purple-100 text-purple-800", MANUAL_USDT:"bg-orange-100 text-orange-800" };
+const METHOD_LABELS: Record<string,string> = { RAZORPAY:"Razorpay", MANUAL_INR:"Manual INR", CRYPTOMUS:"Cryptomus", MANUAL_USDT:"Manual USDT", AUTO:"Auto" };
 
 export default function AdminDepositsPage() {
   const [status, setStatus] = useState("PENDING");
@@ -83,7 +83,7 @@ export default function AdminDepositsPage() {
         <div><h1 className="text-2xl sm:text-3xl font-bold">Deposits</h1>{data?.pendingCount>0&&<p className="text-yellow-600 font-medium text-sm">{data.pendingCount} pending approval</p>}</div>
         <div className="flex gap-2">
           <Select value={status} onValueChange={v=>{setStatus(v);setPage(1);}}><SelectTrigger className="w-32"><SelectValue/></SelectTrigger><SelectContent><SelectItem value="ALL">All</SelectItem><SelectItem value="PENDING">Pending</SelectItem><SelectItem value="COMPLETED">Approved</SelectItem><SelectItem value="FAILED">Rejected</SelectItem></SelectContent></Select>
-          <Select value={method} onValueChange={v=>{setMethod(v);setPage(1);}}><SelectTrigger className="w-36"><SelectValue/></SelectTrigger><SelectContent><SelectItem value="ALL">All Methods</SelectItem><SelectItem value="RAZORPAY">Razorpay</SelectItem><SelectItem value="MANUAL_INR">Manual INR</SelectItem><SelectItem value="cryptomus">Cryptomus</SelectItem><SelectItem value="MANUAL_USDT">Manual USDT</SelectItem></SelectContent></Select>
+          <Select value={method} onValueChange={v=>{setMethod(v);setPage(1);}}><SelectTrigger className="w-36"><SelectValue/></SelectTrigger><SelectContent><SelectItem value="ALL">All Methods</SelectItem><SelectItem value="RAZORPAY">Razorpay</SelectItem><SelectItem value="MANUAL_INR">Manual INR</SelectItem><SelectItem value="CRYPTOMUS">Cryptomus</SelectItem><SelectItem value="MANUAL_USDT">Manual USDT</SelectItem></SelectContent></Select>
         </div>
       </div>
 
@@ -93,7 +93,7 @@ export default function AdminDepositsPage() {
             <div className="flex justify-between gap-2"><div><p className="font-medium text-sm">{d.userEmail}</p><p className="text-xs text-muted-foreground">{formatDate(d.createdAt)}</p></div><Badge className={"text-xs "+STATUS_COLORS[d.status]}>{d.status}</Badge></div>
             <div className="flex gap-2 text-xs flex-wrap"><Badge className={"text-xs "+(METHOD_COLORS[d.method]??"bg-gray-100 text-gray-800")}>{METHOD_LABELS[d.method]??d.method}</Badge>{d.amountInr&&<span>₹{d.amountInr}</span>}{d.amountUsdt&&<span>${d.amountUsdt} USDT</span>}</div>
             {d.txId&&<p className="text-xs font-mono text-muted-foreground truncate">TxID: {d.txId}</p>}
-            {d.status==="PENDING"&&<div className="flex gap-2 pt-1"><Button size="sm" className="flex-1 h-8 bg-green-600 hover:bg-green-700 text-white text-xs" onClick={()=>setApproveD(d)}><CheckCircle className="h-3 w-3 mr-1"/>Approve</Button><Button size="sm" variant="outline" className="flex-1 h-8 text-red-600 border-red-200 text-xs" onClick={()=>setRejectD(d)}><XCircle className="h-3 w-3 mr-1"/>Reject</Button></div>}
+            {d.status==="PENDING"&&(d.method==="MANUAL_INR"||d.method==="MANUAL_USDT")&&<div className="flex gap-2 pt-1"><Button size="sm" className="flex-1 h-8 bg-green-600 hover:bg-green-700 text-white text-xs" onClick={()=>setApproveD(d)}><CheckCircle className="h-3 w-3 mr-1"/>Approve</Button><Button size="sm" variant="outline" className="flex-1 h-8 text-red-600 border-red-200 text-xs" onClick={()=>setRejectD(d)}><XCircle className="h-3 w-3 mr-1"/>Reject</Button></div>}
           </CardContent></Card>
         ))}
       </div>
@@ -109,7 +109,7 @@ export default function AdminDepositsPage() {
             <td className="px-4 py-3 text-xs text-muted-foreground truncate max-w-24">{d.adminNote??" -- "}</td>
             <td className="px-4 py-3 text-center"><Badge className={"text-xs "+STATUS_COLORS[d.status]}>{d.status}</Badge></td>
             <td className="px-4 py-3 text-xs text-muted-foreground">{formatDate(d.createdAt)}</td>
-            <td className="px-4 py-3">{d.status==="PENDING"&&<div className="flex gap-1"><Button size="sm" className="h-7 bg-green-600 hover:bg-green-700 text-white px-2" onClick={()=>setApproveD(d)}><CheckCircle className="h-3 w-3"/></Button><Button size="sm" variant="outline" className="h-7 text-red-600 border-red-200 px-2" onClick={()=>setRejectD(d)}><XCircle className="h-3 w-3"/></Button></div>}{d.status==="COMPLETED"&&<span className="text-xs text-green-600">Approved</span>}{d.status==="FAILED"&&<span className="text-xs text-red-600">Rejected</span>}</td>
+            <td className="px-4 py-3">{d.status==="PENDING"&&(d.method==="MANUAL_INR"||d.method==="MANUAL_USDT")&&<div className="flex gap-1"><Button size="sm" className="h-7 bg-green-600 hover:bg-green-700 text-white px-2" onClick={()=>setApproveD(d)}><CheckCircle className="h-3 w-3"/></Button><Button size="sm" variant="outline" className="h-7 text-red-600 border-red-200 px-2" onClick={()=>setRejectD(d)}><XCircle className="h-3 w-3"/></Button></div>}{d.status==="PENDING"&&d.method!=="MANUAL_INR"&&d.method!=="MANUAL_USDT"&&<span className="text-xs text-muted-foreground">Auto</span>}{d.status==="COMPLETED"&&<span className="text-xs text-green-600">Approved</span>}{d.status==="FAILED"&&<span className="text-xs text-red-600">Rejected</span>}</td>
           </tr>
         ))}</tbody>
       </table></div>
