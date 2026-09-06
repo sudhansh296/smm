@@ -72,6 +72,9 @@ export default async function adminDepositsRoute(fastify: FastifyInstance) {
       if (!deposit) throw new NotFoundError("Deposit not found");
       if (deposit.status === "COMPLETED") throw new ValidationError("Already approved");
       if (deposit.status === "FAILED") throw new ValidationError("Cannot approve a rejected deposit");
+      // Fix 7: admin can only manually approve manual deposits -- gateway deposits are webhook-only
+      const isManual = deposit.method === "MANUAL_INR" || deposit.method === "MANUAL_USDT";
+      if (!isManual) throw new ValidationError("Only MANUAL_INR and MANUAL_USDT deposits can be manually approved. Gateway deposits are auto-approved via webhook.");
 
       // Check idempotency  --  if already credited (shouldn't happen but guard)
       const existing = await tx.transaction.findUnique({ where: { paymentGatewayId: idempotencyKey } });
@@ -133,6 +136,10 @@ export default async function adminDepositsRoute(fastify: FastifyInstance) {
 
     const deposit = await fastify.prisma.depositRequest.findUnique({ where: { id } }) as any;
     if (!deposit) throw new NotFoundError("Deposit not found");
+    // Fix 7: admin reject only for manual deposits
+    if (deposit.method !== "MANUAL_INR" && deposit.method !== "MANUAL_USDT") {
+      throw new ValidationError("Only MANUAL_INR and MANUAL_USDT deposits can be manually rejected.");
+    }
 
     // Atomic conditional update  --  only succeeds if still PENDING
     // Prevents approve+reject race where both could run simultaneously

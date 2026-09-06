@@ -183,9 +183,19 @@ export default async function adminOrdersRoute(fastify: FastifyInstance) {
       };
 
       const mappedStatus  = providerStatus.status ? STATUS_MAP[providerStatus.status] ?? null : null;
-      const rawRemains    = providerStatus.remains ?? order.remains ?? 0;
-      const newRemains    = Math.max(0, Math.min(rawRemains, order.quantity));
       const newStartCount = providerStatus.start_count ?? order.startCount;
+
+      // Fix 2: unknown remains -- do NOT assume 0 for financial decisions
+      const rawRemains = providerStatus.remains !== undefined && providerStatus.remains !== null
+        ? Number(providerStatus.remains) : null;
+      const remainsKnown = (
+        rawRemains !== null &&
+        !isNaN(rawRemains) &&
+        Number.isInteger(rawRemains) &&
+        rawRemains >= 0 &&
+        rawRemains <= order.quantity
+      );
+      const newRemains = remainsKnown ? rawRemains! : (order.remains ?? 0);
 
       if (!mappedStatus || mappedStatus === order.status) {
         await fastify.prisma.order.update({
@@ -197,6 +207,14 @@ export default async function adminOrdersRoute(fastify: FastifyInstance) {
 
       const REFUND_ON = new Set(["PARTIAL", "CANCELLED"]);
       if (REFUND_ON.has(mappedStatus) && !order.refundedAt) {
+        // Fix 2: if remains unknown, do not finalize -- admin must re-sync when data is available
+        if (!remainsKnown) {
+          return reply.send({
+            providerStatus, localStatusUpdated: null,
+            message: `Provider reports ${mappedStatus} but remains unknown -- not finalizing. Re-sync when provider returns remains.`,
+            provider: provider.name,
+          });
+        }
         const refundAmount = calcSyncRefund(order.costUsd.toString(), order.quantity, newRemains);
 
         if (refundAmount.greaterThan(0)) {

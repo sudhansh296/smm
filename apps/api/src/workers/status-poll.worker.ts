@@ -128,7 +128,7 @@ export function createStatusPollWorker(redis: Redis, prisma: PrismaClient) {
                     });
                     console.log(`[status-poll] ${order.id} CANCEL_REQUESTED->CANCELLED refund=$${calcRefundAmount(order.costUsd.toString(), order.quantity, remains).toFixed(2)}`);
 
-                  } else if (newStatus === "PARTIAL" && remainsKnown && remains > 0) {
+                  } else if (newStatus === "PARTIAL" && remainsKnown) {
                     const refundAmount = calcRefundAmount(order.costUsd.toString(), order.quantity, remains);
                     await prisma.$transaction(async (tx) => {
                       // Fix 6: row lock + status check before finalizing

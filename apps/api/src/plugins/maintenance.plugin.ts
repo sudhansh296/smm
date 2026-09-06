@@ -6,8 +6,19 @@ const CACHE_TTL = 30; // seconds
 
 export default fp(async (fastify: FastifyInstance) => {
   fastify.addHook("onRequest", async (request, reply) => {
-    const path = request.url;
-    if (path.startsWith("/webhooks/")) return;
+    const path = request.url.split("?")[0]; // strip query string
+
+    // Always allow: webhooks, health, and auth endpoints needed to log in / refresh
+    const BYPASS_PATHS = [
+      "/webhooks/",
+      "/health",
+      "/auth/login",
+      "/auth/refresh",
+      "/auth/logout",
+      "/auth/google",         // OAuth redirect
+      "/auth/google/callback",
+    ];
+    if (BYPASS_PATHS.some((bp) => path.startsWith(bp))) return;
 
     // Check Redis cache first (fast path)
     const cached = await fastify.redis.get(CACHE_KEY);

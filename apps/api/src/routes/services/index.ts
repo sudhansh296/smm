@@ -89,7 +89,13 @@ export default async function serviceRoutes(fastify: FastifyInstance) {
       const { id } = z.object({ id: z.string() }).parse(request.params);
 
       const service = await fastify.prisma.service.findUnique({
-        where: { id, isEnabled: true },
+        where: {
+          id,
+          isEnabled: true,
+          deletedAt: null,
+          // Fix 6: also hide if provider is disabled or deleted
+          provider: { isEnabled: true, deletedAt: null } as never,
+        },
         include: { category: { select: { id: true, name: true } } },
       });
 
