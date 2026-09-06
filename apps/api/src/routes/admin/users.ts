@@ -137,5 +137,25 @@ export default async function adminUsersRoute(fastify: FastifyInstance) {
       return reply.send({ orders, transactions });
     },
   );
-}
+  // Unlock account
+  fastify.post("/users/:id/unlock", { preHandler: [fastify.authenticateAdmin] }, async (request, reply) => {
+    const { id } = z.object({ id: z.string() }).parse(request.params);
+    const user = await fastify.prisma.user.findUnique({ where: { id }, select: { id: true, email: true } });
+    if (!user) throw new NotFoundError("User not found");
+    await fastify.prisma.user.update({ where: { id }, data: { lockedUntil: null, failedLoginAttempts: 0 } });
+    const lower = user.email.toLowerCase();
+    await fastify.redis.del(`session:lock:${lower}`);
+    await fastify.redis.del(`rl:login:${lower}`);
+    return reply.send({ message: "Account unlocked" });
+  });
 
+  // Manually verify email
+  fastify.post("/users/:id/verify-email", { preHandler: [fastify.authenticateAdmin] }, async (request, reply) => {
+    const { id } = z.object({ id: z.string() }).parse(request.params);
+    const user = await fastify.prisma.user.findUnique({ where: { id }, select: { id: true } });
+    if (!user) throw new NotFoundError("User not found");
+    await fastify.prisma.user.update({ where: { id }, data: { emailVerified: true } });
+    return reply.send({ message: "Email verified" });
+  });
+
+}
