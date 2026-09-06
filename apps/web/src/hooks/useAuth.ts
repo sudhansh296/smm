@@ -51,7 +51,7 @@ export function useAuth() {
       // Server clears HttpOnly cookies on logout
       clearAuth();
       queryClient.clear();
-      router.push("/login");
+      window.location.replace("/login");
     },
   });
 
