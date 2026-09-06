@@ -5,8 +5,8 @@
   "type": "module",
   "main": "./dist/server.js",
   "scripts": {
-    "dev": "tsx --tsconfig tsconfig.json watch src/server.ts",
-    "dev:worker": "tsx --tsconfig tsconfig.json watch src/worker-entrypoint.ts",
+    "dev": "tsx --tsconfig tsconfig.json --watch src/server.ts",
+    "dev:worker": "tsx --tsconfig tsconfig.json --watch src/worker-entrypoint.ts",
     "build": "tsc",
     "start": "node dist/server.js",
     "start:worker": "node dist/worker-entrypoint.js",
