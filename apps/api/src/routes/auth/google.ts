@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import oauth2Plugin from "@fastify/oauth2";
+import oauth2Plugin, { fastifyOauth2 } from "@fastify/oauth2";
 import {
   generateRefreshToken,
   hashRefreshToken,
@@ -24,7 +24,7 @@ export default async function googleAuthRoute(fastify: FastifyInstance) {
     scope:       ["profile", "email"],
     credentials: {
       client: { id: clientId, secret: clientSecret },
-      auth:   oauth2Plugin.GOOGLE_CONFIGURATION,
+      auth:   (oauth2Plugin as any).GOOGLE_CONFIGURATION,
     },
     startRedirectPath: "/google",
     callbackUri:       callbackUrl,  // full URL from env, e.g. http://localhost:3001/auth/google/callback

@@ -105,17 +105,19 @@ export default async function adminDepositsRoute(fastify: FastifyInstance) {
         data: { status: "COMPLETED", ...(note && { adminNote: note }) } as any,
       });
 
+      const creditOpts: Parameters<typeof creditWalletTx>[3] = {
+        type: txType,
+        description: `${deposit.method ?? "Manual"} deposit approved by admin`,
+        paymentGatewayId: idempotencyKey,
+      };
+      if (!isUsdt && deposit.amountInr)        creditOpts.amountInr = new Decimal(deposit.amountInr);
+      if (!isUsdt && deposit.inrRateSnapshot)  creditOpts.inrRate   = new Decimal(deposit.inrRateSnapshot);
+
       await creditWalletTx(
         tx as Parameters<typeof creditWalletTx>[0],
         deposit.userId,
         amountUsd,
-        {
-          type: txType,
-          description: `${deposit.method ?? "Manual"} deposit approved by admin`,
-          amountInr: !isUsdt && deposit.amountInr ? new Decimal(deposit.amountInr) : undefined,
-          inrRate: !isUsdt && deposit.inrRateSnapshot ? new Decimal(deposit.inrRateSnapshot) : undefined,
-          paymentGatewayId: idempotencyKey,
-        },
+        creditOpts,
       );
 
       await tx.notification.create({

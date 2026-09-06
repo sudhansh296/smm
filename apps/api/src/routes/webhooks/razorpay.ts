@@ -15,7 +15,7 @@ function safeEqual(a: string, b: string): boolean {
 export default async function razorpayWebhookRoute(fastify: FastifyInstance) {
   fastify.post("/razorpay", { config: { rawBody: true } }, async (request, reply) => {
     const signature = request.headers["x-razorpay-signature"] as string;
-    const rawBody   = (request as Record<string, unknown>)["rawBody"] as string | undefined;
+    const rawBody   = (request as unknown as Record<string, unknown>)["rawBody"] as string | undefined;
 
     if (!signature || !rawBody) return reply.status(400).send({ error: "Missing signature or body" });
 
