@@ -23,6 +23,7 @@ import depositRoutes from "./routes/deposits/index.js";
 import webhookRoutes from "./routes/webhooks/index.js";
 import adminRoutes from "./routes/admin/index.js";
 import apiV2Routes from "./routes/v2/api.js";
+import publicRoutes from "./routes/public.js";
 
 export async function buildApp(): Promise<FastifyInstance> {
   const fastify = Fastify({
@@ -129,6 +130,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   await fastify.register(webhookRoutes, { prefix: "/webhooks" });
   await fastify.register(adminRoutes, { prefix: "/admin" });
   await fastify.register(apiV2Routes); // mounts at /api/v2
+  await fastify.register(publicRoutes); // public endpoints - no auth
 
   // -- Health check ------------------------------------------------------
   fastify.get("/health", async () => ({
