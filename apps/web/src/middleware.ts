@@ -15,12 +15,7 @@ export function middleware(request: NextRequest) {
   const accessToken  = request.cookies.get("accessToken")?.value;
   const refreshToken = request.cookies.get("refreshToken")?.value;
 
-  // Consider authenticated if EITHER cookie is present.
-  // accessToken is short-lived (15 min); refreshToken is long-lived (7 days).
-  // The API /auth/refresh endpoint will renew accessToken when needed.
-  // Without this check, users get logged out every 15 min on page refresh.
   const isAuthenticated = !!(accessToken || refreshToken);
-
   const isPublic = PUBLIC_PATHS.some((p) => pathname.startsWith(p));
 
   // Not authenticated -- redirect to login
