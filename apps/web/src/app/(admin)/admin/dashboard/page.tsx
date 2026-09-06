@@ -86,7 +86,7 @@ export default function AdminDashboardPage() {
                     <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
                     <XAxis dataKey="date" tick={{ fontSize: 11 }} />
                     <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => `$${v}`} width={50} />
-                    <Tooltip formatter={(v: number) => [`$${v.toFixed(2)}`, "Revenue"]} />
+                    <Tooltip formatter={(v: unknown) => [`$${Number(v).toFixed(2)}`, "Revenue"]} />
                     <Line type="monotone" dataKey="revenue" stroke="#6366f1" strokeWidth={2} dot={{ r: 4, fill: "#6366f1" }} activeDot={{ r: 6 }} />
                   </LineChart>
                 </ResponsiveContainer>
@@ -103,7 +103,7 @@ export default function AdminDashboardPage() {
                     <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
                     <XAxis dataKey="date" tick={{ fontSize: 11 }} />
                     <YAxis tick={{ fontSize: 11 }} width={35} allowDecimals={false} />
-                    <Tooltip formatter={(v: number) => [v, "Orders"]} />
+                    <Tooltip formatter={(v: unknown) => [Number(v), "Orders"]} />
                     <Bar dataKey="orders" fill="#8b5cf6" radius={[4, 4, 0, 0]} />
                   </BarChart>
                 </ResponsiveContainer>
@@ -130,7 +130,7 @@ export default function AdminDashboardPage() {
                           <Cell key={entry.status} fill={STATUS_COLORS[entry.status] ?? "#94a3b8"} />
                         ))}
                       </Pie>
-                      <Tooltip formatter={(v: number, name: string) => [v, name]} />
+                      <Tooltip formatter={(v: unknown, name: unknown) => [Number(v), String(name)]} />
                       <Legend iconSize={10} wrapperStyle={{ fontSize: 11 }} />
                     </PieChart>
                   </ResponsiveContainer>
@@ -151,7 +151,7 @@ export default function AdminDashboardPage() {
                       <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" horizontal={false} />
                       <XAxis type="number" tick={{ fontSize: 11 }} allowDecimals={false} />
                       <YAxis type="category" dataKey="name" tick={{ fontSize: 10 }} width={120} />
-                      <Tooltip formatter={(v: number) => [v, "Orders"]} />
+                      <Tooltip formatter={(v: unknown) => [Number(v), "Orders"]} />
                       <Bar dataKey="orders" fill="#22c55e" radius={[0, 4, 4, 0]} />
                     </BarChart>
                   </ResponsiveContainer>

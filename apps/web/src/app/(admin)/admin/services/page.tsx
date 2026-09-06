@@ -250,7 +250,7 @@ export default function AdminServicesPage() {
                 </select>
                 {editService.backupProviderId && (
                   <p className="text-xs text-muted-foreground">
-                    If primary fails -> auto-retry on backup provider
+                    If primary fails -&gt; auto-retry on backup provider
                   </p>
                 )}
               </div>

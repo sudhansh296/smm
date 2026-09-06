@@ -66,7 +66,7 @@ function NavLinks({
           <Link
             key={item.href}
             href={item.href}
-            onClick={onClose}
+            {...(onClose ? { onClick: onClose } : {})}
             className={cn(
               "flex items-center gap-3 px-3 py-2.5 rounded-md text-sm font-medium transition-colors",
               pathname === item.href
@@ -91,7 +91,7 @@ function NavLinks({
               <Link
                 key={item.href}
                 href={item.href}
-                onClick={onClose}
+                {...(onClose ? { onClick: onClose } : {})}
                 className={cn(
                   "flex items-center gap-3 px-3 py-2.5 rounded-md text-sm font-medium transition-colors",
                   pathname.startsWith(item.href)
@@ -131,7 +131,7 @@ export function Sidebar() {
     <div className="flex flex-col h-full">
       {/* Logo */}
       <div className="p-5 border-b flex items-center justify-between">
-        <Link href="/dashboard" onClick={onClose} className="flex items-center gap-2">
+        <Link href="/dashboard" {...(onClose ? { onClick: onClose } : {})} className="flex items-center gap-2">
           <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center shrink-0">
             <span className="text-white font-bold text-sm">N</span>
           </div>
@@ -154,7 +154,7 @@ export function Sidebar() {
       )}
 
       {/* Nav */}
-      <NavLinks pathname={pathname} isAdmin={isAdmin} onClose={onClose} />
+      <NavLinks pathname={pathname} isAdmin={isAdmin} {...(onClose ? { onClose } : {})} />
 
       {/* User + logout */}
       <div className="p-4 border-t sidebar-safe">
