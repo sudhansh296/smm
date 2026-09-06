@@ -1,6 +1,6 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  output: "standalone",
+  // output: "standalone",  // disabled: causes EPERM symlink errors on Windows
   experimental: {
     serverComponentsExternalPackages: [],
   },

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, Suspense } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useForm } from "react-hook-form";
@@ -33,13 +33,13 @@ function GoogleIcon() {
   );
 }
 
-export default function LoginPage() {
+// Inner component uses useSearchParams -- must be inside Suspense
+function LoginForm() {
   const { loginAsync, isLoggingIn } = useAuth();
   const [requiresTotp, setRequiresTotp] = useState(false);
   const searchParams = useSearchParams();
   const { register, handleSubmit, formState: { errors } } = useForm<F>({ resolver: zodResolver(schema) });
 
-  // Show error from OAuth redirect
   useEffect(() => {
     const error = searchParams.get("error");
     if (error === "oauth_failed")  toast.error("Google sign-in failed. Please try again.");
@@ -52,10 +52,6 @@ export default function LoginPage() {
       const r = await loginAsync(data as { email: string; password: string; totpCode?: string });
       if (r.requiresTotpCode) setRequiresTotp(true);
     } catch { /* handled in hook */ }
-  };
-
-  const handleGoogleLogin = () => {
-    window.location.href = `${API_URL}/auth/google`;
   };
 
   return (
@@ -91,23 +87,15 @@ export default function LoginPage() {
           <Button type="submit" className="w-full" loading={isLoggingIn}>Sign In</Button>
         </form>
 
-        {/* Divider */}
         <div className="relative my-4">
-          <div className="absolute inset-0 flex items-center">
-            <span className="w-full border-t" />
-          </div>
+          <div className="absolute inset-0 flex items-center"><span className="w-full border-t" /></div>
           <div className="relative flex justify-center text-xs uppercase">
             <span className="bg-background px-2 text-muted-foreground">or continue with</span>
           </div>
         </div>
 
-        {/* Google button */}
-        <Button
-          type="button"
-          variant="outline"
-          className="w-full flex items-center gap-2"
-          onClick={handleGoogleLogin}
-        >
+        <Button type="button" variant="outline" className="w-full flex items-center gap-2"
+          onClick={() => { window.location.href = `${API_URL}/auth/google`; }}>
           <GoogleIcon />
           Continue with Google
         </Button>
@@ -118,5 +106,19 @@ export default function LoginPage() {
         </p>
       </CardContent>
     </Card>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={
+      <Card className="shadow-lg">
+        <CardContent className="flex justify-center py-16">
+          <div className="animate-spin h-8 w-8 border-4 border-primary border-t-transparent rounded-full" />
+        </CardContent>
+      </Card>
+    }>
+      <LoginForm />
+    </Suspense>
   );
 }

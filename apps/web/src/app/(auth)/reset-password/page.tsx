@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, Suspense } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
@@ -12,33 +12,26 @@ import { Label } from "@/components/ui/label";
 import { api, getErrorMessage } from "@/lib/api";
 import { toast } from "sonner";
 
-const schema = z
-  .object({
-    password: z.string().min(8, "Password must be at least 8 characters"),
-    confirmPassword: z.string(),
-  })
-  .refine((d) => d.password === d.confirmPassword, {
-    message: "Passwords do not match",
-    path: ["confirmPassword"],
-  });
+const schema = z.object({
+  password:        z.string().min(8, "Password must be at least 8 characters"),
+  confirmPassword: z.string(),
+}).refine((d) => d.password === d.confirmPassword, {
+  message: "Passwords do not match",
+  path: ["confirmPassword"],
+});
 
-export default function ResetPasswordPage() {
+function ResetPasswordForm() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const token = searchParams.get("token") ?? "";
   const [loading, setLoading] = useState(false);
 
-  const {
-    register,
-    handleSubmit,
-    formState: { errors },
-  } = useForm<z.infer<typeof schema>>({ resolver: zodResolver(schema) });
+  const { register, handleSubmit, formState: { errors } } = useForm<z.infer<typeof schema>>({
+    resolver: zodResolver(schema),
+  });
 
   const onSubmit = async (data: { password: string }) => {
-    if (!token) {
-      toast.error("Invalid or missing reset token");
-      return;
-    }
+    if (!token) { toast.error("Invalid or missing reset token"); return; }
     setLoading(true);
     try {
       await api.post("/auth/reset-password", { token, password: data.password });
@@ -62,22 +55,30 @@ export default function ResetPasswordPage() {
           <div className="space-y-2">
             <Label htmlFor="password">New Password</Label>
             <Input id="password" type="password" placeholder="Min. 8 characters" {...register("password")} />
-            {errors.password && <p className="text-sm text-destructive">{errors.password?.message as string}</p>}
+            {errors.password && <p className="text-sm text-destructive">{errors.password.message as string}</p>}
           </div>
           <div className="space-y-2">
             <Label htmlFor="confirmPassword">Confirm Password</Label>
             <Input id="confirmPassword" type="password" placeholder="Re-enter password" {...register("confirmPassword")} />
-            {errors.confirmPassword && (
-              <p className="text-sm text-destructive">{errors.confirmPassword?.message as string}</p>
-            )}
+            {errors.confirmPassword && <p className="text-sm text-destructive">{errors.confirmPassword.message as string}</p>}
           </div>
-          <Button type="submit" className="w-full" loading={loading}>
-            Reset Password
-          </Button>
+          <Button type="submit" className="w-full" loading={loading}>Reset Password</Button>
         </form>
       </CardContent>
     </Card>
   );
 }
 
-
+export default function ResetPasswordPage() {
+  return (
+    <Suspense fallback={
+      <Card>
+        <CardContent className="flex justify-center py-16">
+          <div className="animate-spin h-8 w-8 border-4 border-primary border-t-transparent rounded-full" />
+        </CardContent>
+      </Card>
+    }>
+      <ResetPasswordForm />
+    </Suspense>
+  );
+}
