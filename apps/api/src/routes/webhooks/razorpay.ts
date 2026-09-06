@@ -27,7 +27,7 @@ export default async function razorpayWebhookRoute(fastify: FastifyInstance) {
 
     const event = request.body as {
       event: string;
-      payload: { payment: { entity: { id: string; order_id: string; amount: number; status: string } } };
+      payload: { payment: { entity: { id: string; order_id: string; amount: number } } };
     };
 
     if (event.event !== "payment.captured") return reply.status(200).send({ ok: true });
@@ -35,16 +35,21 @@ export default async function razorpayWebhookRoute(fastify: FastifyInstance) {
     const { id: paymentId, order_id: razorpayOrderId, amount: amountPaise } = event.payload.payment.entity;
     const amountInr = amountPaise / 100;
 
-    // Use shared function -- same atomic flow as /verify endpoint
-    const { alreadyDone, amountUsd, userId } = await finalizeRazorpayDeposit(
+    const result = await finalizeRazorpayDeposit(
       fastify.prisma,
       razorpayOrderId,
       paymentId,
-      amountInr, // webhook provides actual charged amount
+      { amountInrOverride: amountInr }, // webhook provides actual charged amount
     );
 
-    if (!alreadyDone) {
-      fastify.log.info({ paymentId, userId, usd: amountUsd }, "Razorpay webhook credited");
+    if (result.status === "not_found") {
+      // Signed webhook but no matching deposit -- log and ack (don't 4xx Razorpay)
+      fastify.log.warn({ razorpayOrderId }, "Razorpay webhook: no matching deposit found");
+      return reply.status(200).send({ ok: true });
+    }
+
+    if (result.status === "credited") {
+      fastify.log.info({ paymentId, userId: result.userId, usd: result.amountUsd }, "Razorpay webhook credited");
     }
 
     return reply.status(200).send({ ok: true });

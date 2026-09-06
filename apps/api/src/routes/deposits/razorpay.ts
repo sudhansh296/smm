@@ -7,15 +7,21 @@ import { env } from "../../lib/env.js";
 import { Decimal } from "decimal.js";
 import type { PrismaClient } from "@nexussmm/db";
 
-// Shared atomic finalization -- used by both /verify and webhook
-// Prevents double-credit regardless of which path arrives first
-async function finalizeRazorpayDeposit(
+// Typed result -- callers must handle all 3 cases explicitly
+type FinalizeRazorpayResult =
+  | { status: "credited";    amountUsd: string; userId: string }
+  | { status: "already_done"; amountUsd: string; userId: string }
+  | { status: "not_found" };
+
+// Shared atomic finalization used by both /verify and webhook.
+// expectedUserId: when set, rejects deposits belonging to other users (verify path only).
+export async function finalizeRazorpayDeposit(
   prisma: PrismaClient,
   razorpayOrderId: string,
   paymentId: string,
-  amountInrOverride?: number, // webhook provides actual charged amount
-): Promise<{ alreadyDone: boolean; amountUsd: string; userId: string }> {
-  let result = { alreadyDone: false, amountUsd: "0", userId: "" };
+  options: { amountInrOverride?: number; expectedUserId?: string } = {},
+): Promise<FinalizeRazorpayResult> {
+  let result: FinalizeRazorpayResult = { status: "not_found" };
 
   await prisma.$transaction(async (tx) => {
     // 1. Lock deposit row -- prevents concurrent verify + webhook double-credit
@@ -28,21 +34,40 @@ async function finalizeRazorpayDeposit(
       WHERE "gatewayOrderId" = ${razorpayOrderId}
       FOR UPDATE
     `;
+
     const deposit = deposits[0];
-    if (!deposit) return;
-    if (deposit.status === "COMPLETED") { result = { alreadyDone: true, amountUsd: "0", userId: deposit.userId }; return; }
+    if (!deposit) {
+      result = { status: "not_found" };
+      return;
+    }
+
+    // 2. Ownership check (verify path) -- prevents one user claiming another's deposit
+    if (options.expectedUserId && deposit.userId !== options.expectedUserId) {
+      result = { status: "not_found" }; // treat as not found -- don't leak existence
+      return;
+    }
+
+    // 3. Already completed
+    if (deposit.status === "COMPLETED") {
+      result = { status: "already_done", amountUsd: "0", userId: deposit.userId };
+      return;
+    }
+
+    // 4. Idempotency check on transaction record
+    const existing = await tx.transaction.findUnique({ where: { paymentGatewayId: paymentId } });
+    if (existing) {
+      result = { status: "already_done", amountUsd: "0", userId: deposit.userId };
+      return;
+    }
+
     if (!deposit.inrRateSnapshot) throw new ValidationError("Rate snapshot missing on deposit");
 
-    // 2. Idempotency check on transaction record
-    const existing = await tx.transaction.findUnique({ where: { paymentGatewayId: paymentId } });
-    if (existing) { result = { alreadyDone: true, amountUsd: "0", userId: deposit.userId }; return; }
-
-    // 3. Calculate USD using snapshot rate (never current rate)
-    const inrAmount = amountInrOverride ?? Number(deposit.amountInr ?? 0);
+    // 5. Calculate USD using snapshot rate (never current rate)
+    const inrAmount    = options.amountInrOverride ?? Number(deposit.amountInr ?? 0);
     const snapshotRate = new Decimal(deposit.inrRateSnapshot.toString());
-    const amountUsd = new Decimal(inrAmount).dividedBy(snapshotRate).toDecimalPlaces(8);
+    const amountUsd    = new Decimal(inrAmount).dividedBy(snapshotRate).toDecimalPlaces(8);
 
-    // 4. Lock user wallet row
+    // 6. Lock user wallet row
     const rows = await tx.$queryRaw<Array<{ walletBalance: string }>>`
       SELECT "walletBalance" FROM users WHERE id = ${deposit.userId} FOR UPDATE
     `;
@@ -50,7 +75,7 @@ async function finalizeRazorpayDeposit(
     const balance    = new Decimal(rows[0].walletBalance);
     const newBalance = balance.plus(amountUsd);
 
-    // 5. Update deposit, credit wallet, create ledger entry, notify
+    // 7. Update deposit, credit wallet, create ledger entry, notify
     await tx.depositRequest.update({
       where: { id: deposit.id },
       data: { status: "COMPLETED", gatewayPaymentId: paymentId } as any,
@@ -73,10 +98,13 @@ async function finalizeRazorpayDeposit(
       },
     });
     await tx.notification.create({
-      data: { userId: deposit.userId, message: `Rs.${inrAmount} deposited via Razorpay. $${amountUsd.toFixed(2)} added to your wallet.` },
+      data: {
+        userId:  deposit.userId,
+        message: `Rs.${inrAmount} deposited via Razorpay. $${amountUsd.toFixed(2)} added to your wallet.`,
+      },
     });
 
-    result = { alreadyDone: false, amountUsd: amountUsd.toFixed(2), userId: deposit.userId };
+    result = { status: "credited", amountUsd: amountUsd.toFixed(2), userId: deposit.userId };
   });
 
   return result;
@@ -84,7 +112,11 @@ async function finalizeRazorpayDeposit(
 
 export default async function razorpayDepositRoute(fastify: FastifyInstance) {
   const isProduction = process.env["NODE_ENV"] === "production";
-  const isMock = !isProduction && (!env.RAZORPAY_KEY_ID || env.RAZORPAY_KEY_ID === "mock" || env.RAZORPAY_KEY_ID.startsWith("rzp_test_xxx"));
+  const isMock = !isProduction && (
+    !env.RAZORPAY_KEY_ID ||
+    env.RAZORPAY_KEY_ID === "mock" ||
+    env.RAZORPAY_KEY_ID.startsWith("rzp_test_xxx")
+  );
 
   if (isProduction && (!env.RAZORPAY_KEY_ID || env.RAZORPAY_KEY_ID === "mock" || env.RAZORPAY_KEY_ID.startsWith("rzp_test_xxx"))) {
     fastify.log.error("Razorpay mock credentials detected in production");
@@ -121,51 +153,55 @@ export default async function razorpayDepositRoute(fastify: FastifyInstance) {
 
     await fastify.prisma.depositRequest.create({
       data: {
-        userId: request.user.sub,
-        gateway: "razorpay",
-        method: "RAZORPAY",
+        userId:          request.user.sub,
+        gateway:         "razorpay",
+        method:          "RAZORPAY",
         amountInr,
-        amountUsdt: null,
-        gatewayOrderId: rzpOrderId,
+        amountUsdt:      null,
+        gatewayOrderId:  rzpOrderId,
         inrRateSnapshot: new Decimal(effectiveRate).toDecimalPlaces(4).toNumber(),
       } as any,
     });
 
     return reply.send({
       razorpayOrderId: rzpOrderId,
-      amountInr, currency: "INR",
-      keyId: env.RAZORPAY_KEY_ID,
-      effectiveRate: effectiveRate.toFixed(4),
-      usdEquivalent: amountUsd.toFixed(2),
+      amountInr,
+      currency:       "INR",
+      keyId:          env.RAZORPAY_KEY_ID,
+      effectiveRate:  effectiveRate.toFixed(4),
+      usdEquivalent:  amountUsd.toFixed(2),
       isMock,
     });
   });
 
-  // Verify payment after frontend callback -- uses shared finalizeRazorpayDeposit
+  // Verify payment after frontend callback
   fastify.post("/razorpay/verify", { preHandler: [fastify.authenticate] }, async (request, reply) => {
     const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = z.object({
-      razorpay_order_id:  z.string(),
+      razorpay_order_id:   z.string(),
       razorpay_payment_id: z.string(),
-      razorpay_signature: z.string(),
+      razorpay_signature:  z.string(),
     }).parse(request.body);
 
     const isValid = isMock ? true : (() => {
-      const body = razorpay_order_id + "|" + razorpay_payment_id;
+      const body     = razorpay_order_id + "|" + razorpay_payment_id;
       const expected = createHmac("sha256", env.RAZORPAY_KEY_SECRET).update(body).digest("hex");
       return expected === razorpay_signature;
     })();
     if (!isValid) return reply.status(400).send({ error: "Invalid payment signature" });
 
-    const { alreadyDone, amountUsd } = await finalizeRazorpayDeposit(
+    const result = await finalizeRazorpayDeposit(
       fastify.prisma,
       razorpay_order_id,
       razorpay_payment_id,
+      { expectedUserId: request.user.sub }, // ownership check
     );
 
-    if (alreadyDone) return reply.send({ message: "Already credited", amountUsd });
-    return reply.send({ message: "Payment verified. Wallet credited.", amountUsd });
+    if (result.status === "not_found") {
+      return reply.status(404).send({ error: "Deposit not found" });
+    }
+    if (result.status === "already_done") {
+      return reply.send({ message: "Already credited", amountUsd: result.amountUsd });
+    }
+    return reply.send({ message: "Payment verified. Wallet credited.", amountUsd: result.amountUsd });
   });
 }
-
-// Export for use in webhook handler
-export { finalizeRazorpayDeposit };
