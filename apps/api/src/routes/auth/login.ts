@@ -80,7 +80,7 @@ export default async function loginRoute(fastify: FastifyInstance) {
       throw new UnauthorizedError("Invalid email or password");
     }
 
-    if (!user.emailVerified && process.env["NODE_ENV"] === "production") {
+    if (!user.emailVerified) {
       throw new UnauthorizedError("Please verify your email before logging in");
     }
 
