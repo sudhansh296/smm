@@ -28,6 +28,12 @@ api.interceptors.response.use(
   async (error: AxiosError) => {
     const original = error.config as typeof error.config & { _retry?: boolean };
 
+    // Pass through known auth errors that the UI handles directly
+    const errCode = (error.response?.data as any)?.code;
+    if (errCode === "EMAIL_NOT_VERIFIED") {
+      return Promise.reject(error);
+    }
+
     if (error.response?.status === 401 && !original._retry) {
       if (isRefreshing) {
         // Issue 7 fix: queue the request and wait for refresh to complete or fail
