@@ -23,7 +23,7 @@ const pwSchema = z.object({
 }).refine((d) => d.newPassword === d.confirmPassword, { message: "Passwords do not match", path: ["confirmPassword"] });
 
 export default function SecurityPage() {
-  const { user } = useAuthStore();
+  const { user, updateUser } = useAuthStore();
   const qc = useQueryClient();
   const [backupCodes, setBackupCodes] = useState<string[] | null>(null);
   const [totpQr, setTotpQr] = useState<string | null>(null);
@@ -48,13 +48,24 @@ export default function SecurityPage() {
 
   const verifyMutation = useMutation({
     mutationFn: (code: string) => api.post("/auth/totp/verify", { code }).then((r) => r.data),
-    onSuccess: (d) => { setBackupCodes(d.backupCodes); setTotpQr(null); toast.success("2FA enabled!"); },
+    onSuccess: (d) => {
+      setBackupCodes(d.backupCodes);
+      setTotpQr(null);
+      updateUser({ totpEnabled: true }); // update store so heading reflects immediately
+      toast.success("2FA enabled!");
+    },
     onError: (err) => toast.error(getErrorMessage(err)),
   });
 
   const disableMutation = useMutation({
     mutationFn: (code: string) => api.post("/auth/totp/disable", { code }),
-    onSuccess: () => { toast.success("2FA disabled"); qc.invalidateQueries({ queryKey: ["profile"] }); },
+    onSuccess: () => {
+      updateUser({ totpEnabled: false }); // update store immediately
+      setBackupCodes(null);
+      setDisableCode("");
+      toast.success("2FA disabled");
+      qc.invalidateQueries({ queryKey: ["profile"] });
+    },
     onError: (err) => toast.error(getErrorMessage(err)),
   });
 
@@ -113,24 +124,9 @@ export default function SecurityPage() {
                   <p className="text-sm text-muted-foreground">Scan with your authenticator app:</p>
                   <img src={totpQr} alt="TOTP QR" className="w-40 h-40 border rounded-lg" />
                   <div className="flex gap-2">
-                    <Input placeholder="Enter 6-digit code" maxLength={6} value={totpConfirmCode} onChange={(e) => setTotpConfirmCode(e.target.value)} className="max-w-[160px]" />
+                    <Input placeholder="Enter 6-digit code" maxLength={6} value={totpConfirmCode}
+                      onChange={(e) => setTotpConfirmCode(e.target.value)} className="max-w-[160px]" />
                     <Button size="sm" onClick={() => verifyMutation.mutate(totpConfirmCode)} loading={verifyMutation.isPending}>Verify</Button>
-                  </div>
-                </div>
-              )}
-              {backupCodes && (
-                <div className="rounded-lg bg-yellow-50 border border-yellow-200 p-4 space-y-3">
-                  <div className="flex items-center justify-between">
-                    <p className="font-semibold text-yellow-800 text-sm">Save your backup codes</p>
-                    <Button size="sm" variant="ghost" onClick={() => { navigator.clipboard.writeText(backupCodes.join("\n")); toast.success("Copied"); }}>
-                      <Copy className="h-3 w-3 mr-1" />Copy
-                    </Button>
-                  </div>
-                  <p className="text-xs text-yellow-700">Each code can only be used once.</p>
-                  <div className="grid grid-cols-2 gap-2">
-                    {backupCodes.map((c) => (
-                      <code key={c} className="bg-white border rounded px-2 py-1 text-xs font-mono text-center">{c}</code>
-                    ))}
                   </div>
                 </div>
               )}
@@ -139,8 +135,27 @@ export default function SecurityPage() {
             <div className="space-y-3">
               <Badge variant="success">2FA is active</Badge>
               <div className="flex gap-2 flex-wrap">
-                <Input placeholder="Enter 2FA or backup code" value={disableCode} onChange={(e) => setDisableCode(e.target.value)} maxLength={10} className="max-w-[200px]" />
+                <Input placeholder="Enter 2FA or backup code" value={disableCode}
+                  onChange={(e) => setDisableCode(e.target.value)} maxLength={10} className="max-w-[200px]" />
                 <Button size="sm" variant="destructive" onClick={() => disableMutation.mutate(disableCode)} loading={disableMutation.isPending}>Disable 2FA</Button>
+              </div>
+            </div>
+          )}
+
+          {/* Backup codes — outside the ternary so they stay visible after enabling 2FA */}
+          {backupCodes && (
+            <div className="rounded-lg bg-yellow-50 border border-yellow-200 p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <p className="font-semibold text-yellow-800 text-sm">Save your backup codes</p>
+                <Button size="sm" variant="ghost" onClick={() => { navigator.clipboard.writeText(backupCodes.join("\n")); toast.success("Copied"); }}>
+                  <Copy className="h-3 w-3 mr-1" />Copy
+                </Button>
+              </div>
+              <p className="text-xs text-yellow-700">Each code can only be used once. Save them somewhere safe.</p>
+              <div className="grid grid-cols-2 gap-2">
+                {backupCodes.map((c) => (
+                  <code key={c} className="bg-white border rounded px-2 py-1 text-xs font-mono text-center">{c}</code>
+                ))}
               </div>
             </div>
           )}
