@@ -91,13 +91,13 @@ export default function OrdersPage() {
           }) => (
             <Card key={order.id}>
               <CardContent className="p-4">
-                {/* Order ID bar */}
+                {/* Order ID */}
                 <div className="flex items-center gap-1.5 mb-3 pb-2.5 border-b border-dashed">
                   <span className="text-xs text-muted-foreground font-medium">Order ID:</span>
-                  <code className="text-xs font-mono text-slate-700 bg-slate-100 px-2 py-0.5 rounded select-all">
-                    {order.id}
-                  </code>
-                  <CopyButton text={order.id} />
+                  <div className="flex items-center gap-1 bg-slate-100 border border-slate-200 rounded-md px-2 py-0.5">
+                    <code className="text-xs font-mono text-slate-700">{order.id}</code>
+                    <CopyButton text={order.id} />
+                  </div>
                 </div>
 
                 <div className="flex items-start justify-between gap-3">

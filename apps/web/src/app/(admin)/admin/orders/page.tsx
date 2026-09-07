@@ -169,9 +169,11 @@ export default function AdminOrdersPage() {
               <CardContent className="p-4 space-y-2">
                 {/* Order ID */}
                 <div className="flex items-center gap-1.5 pb-2 border-b border-dashed">
-                  <span className="text-xs text-muted-foreground">Order ID:</span>
-                  <code className="text-xs font-mono text-slate-700 bg-slate-100 px-2 py-0.5 rounded select-all flex-1 truncate">{o.id}</code>
-                  <CopyBtn text={o.id} label="Order ID" />
+                  <span className="text-xs text-muted-foreground font-medium">Order ID:</span>
+                  <div className="flex items-center gap-1 bg-slate-100 border border-slate-200 rounded-md px-2 py-0.5 min-w-0">
+                    <code className="text-xs font-mono text-slate-700 truncate">{o.id}</code>
+                    <CopyBtn text={o.id} label="Order ID" />
+                  </div>
                 </div>
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
@@ -245,10 +247,8 @@ export default function AdminOrdersPage() {
                 : filtered.map((o: any) => (
                   <tr key={o.id} className="hover:bg-muted/30">
                     <td className="px-4 py-3">
-                      <div className="flex items-center gap-1">
-                        <code className="font-mono text-xs text-slate-700 bg-slate-100 px-1.5 py-0.5 rounded" title={o.id}>
-                          {o.id.slice(0, 8)}...
-                        </code>
+                      <div className="flex items-center gap-1 bg-slate-100 border border-slate-200 rounded-md px-2 py-0.5 w-fit">
+                        <code className="font-mono text-xs text-slate-700" title={o.id}>{o.id.slice(0, 16)}...</code>
                         <CopyBtn text={o.id} label="Order ID" />
                       </div>
                       {o.providerOrderId && (
