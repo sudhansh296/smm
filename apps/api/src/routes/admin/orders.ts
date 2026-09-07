@@ -21,6 +21,7 @@ export default async function adminOrdersRoute(fastify: FastifyInstance) {
       page:       z.coerce.number().min(1).default(1),
       limit:      z.coerce.number().min(1).max(100).default(20),
       status:     z.string().optional(),
+      search:     z.string().optional(),
       userId:     z.string().optional(),
       providerId: z.string().optional(),
       dateFrom:   z.string().datetime({ message: "Invalid date" }).optional(),
@@ -37,6 +38,18 @@ export default async function adminOrdersRoute(fastify: FastifyInstance) {
         ...(q.dateFrom && { gte: new Date(q.dateFrom) }),
         ...(q.dateTo   && { lte: new Date(q.dateTo) }),
       };
+    }
+
+    // Server-side search: Order ID, email, service name, provider order ID
+    if (q.search) {
+      const s = q.search.trim();
+      where["OR"] = [
+        { id: { contains: s } },
+        { providerOrderId: { contains: s } },
+        { link: { contains: s, mode: "insensitive" } },
+        { user: { email: { contains: s, mode: "insensitive" } } },
+        { service: { name: { contains: s, mode: "insensitive" } } },
+      ];
     }
 
     const [orders, total] = await Promise.all([

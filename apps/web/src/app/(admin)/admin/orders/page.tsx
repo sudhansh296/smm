@@ -74,8 +74,15 @@ export default function AdminOrdersPage() {
   const qc = useQueryClient();
 
   const { data, isLoading } = useQuery({
-    queryKey: ["admin-orders", { status, page }],
-    queryFn: () => api.get("/admin/orders", { params: { status: status === "ALL" ? undefined : status, page, limit: 20 } }).then((r) => r.data),
+    queryKey: ["admin-orders", { status, page, search }],
+    queryFn: () => api.get("/admin/orders", {
+      params: {
+        status: status === "ALL" ? undefined : status,
+        search: search.trim() || undefined,
+        page,
+        limit: 20,
+      }
+    }).then((r) => r.data),
     placeholderData: (prev) => prev,
   });
 
@@ -99,18 +106,8 @@ export default function AdminOrdersPage() {
     onError: (err) => toast.error(getErrorMessage(err)),
   });
 
-  // Client-side filter: search by Order ID, email, service name, provider order ID
-  const filtered = data?.orders?.filter((o: any) => {
-    if (!search) return true;
-    const s = search.toLowerCase().trim();
-    return (
-      o.id.toLowerCase().includes(s) ||
-      o.userEmail?.toLowerCase().includes(s) ||
-      o.serviceName?.toLowerCase().includes(s) ||
-      o.providerOrderId?.toLowerCase().includes(s) ||
-      o.providerName?.toLowerCase().includes(s)
-    );
-  }) ?? [];
+  // Server-side search -- just use data.orders directly
+  const filtered = data?.orders ?? [];
 
   const canRefund = (s: string) => !["REFUNDED", "COMPLETED"].includes(s);
 
@@ -136,7 +133,8 @@ export default function AdminOrdersPage() {
           <div className="relative flex-1 sm:w-72">
             <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
             <Input placeholder={searchPlaceholder} className="pl-9 pr-8" value={search}
-              onChange={(e) => { setSearch(e.target.value); setPage(1); }} />
+              onChange={(e) => { setSearch(e.target.value); setPage(1); }}
+              onKeyDown={(e) => e.key === "Escape" && setSearch("")} />
             {search && (
               <button onClick={() => setSearch("")} className="absolute right-2 top-2.5 p-0.5 rounded hover:bg-muted">
                 <X className="h-3.5 w-3.5 text-muted-foreground" />
