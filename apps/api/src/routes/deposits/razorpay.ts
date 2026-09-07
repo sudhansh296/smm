@@ -175,7 +175,7 @@ export default async function razorpayDepositRoute(fastify: FastifyInstance) {
     });
   });
 
-  // POST /deposits/razorpay/verify -- verify checkout signature and credit wallet
+  // POST /deposits/razorpay/verify -- verify checkout signature + server-side payment status, then credit wallet
   fastify.post("/razorpay/verify", { preHandler: [fastify.authenticate] }, async (request, reply) => {
     const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = z.object({
       razorpay_order_id:   z.string(),
@@ -183,9 +183,8 @@ export default async function razorpayDepositRoute(fastify: FastifyInstance) {
       razorpay_signature:  z.string(),
     }).parse(request.body);
 
-    // Signature verification:
-    // mock: skip (no real Razorpay)
-    // test/live: always verify HMAC SHA256 -- never bypass
+    // Step 1: Verify checkout HMAC signature
+    // mock: skip | test/live: always verify -- never bypass
     const signatureValid = isMock
       ? true
       : (() => {
@@ -195,10 +194,64 @@ export default async function razorpayDepositRoute(fastify: FastifyInstance) {
         })();
 
     if (!signatureValid) {
-      fastify.log.warn({ razorpay_order_id }, "Razorpay /verify signature mismatch");
+      fastify.log.warn({ razorpay_order_id }, "Razorpay /verify: signature mismatch");
       return reply.status(400).send({ error: "Invalid payment signature" });
     }
 
+    // Step 2: Server-side payment status verification (test/live only)
+    // Do NOT trust frontend callback alone -- fetch actual payment from Razorpay API
+    if (!isMock) {
+      let payment: any;
+      try {
+        payment = await razorpay!.payments.fetch(razorpay_payment_id);
+      } catch (err) {
+        fastify.log.error({ err, razorpay_payment_id }, "Razorpay /verify: failed to fetch payment from Razorpay API");
+        return reply.status(502).send({ error: "Could not verify payment with Razorpay. Please try again." });
+      }
+
+      // Verify payment ID matches
+      if (payment.id !== razorpay_payment_id) {
+        fastify.log.warn({ razorpay_payment_id, fetched: payment.id }, "Razorpay /verify: payment ID mismatch");
+        return reply.status(400).send({ error: "Payment verification failed: ID mismatch" });
+      }
+
+      // Verify order ID matches
+      if (payment.order_id !== razorpay_order_id) {
+        fastify.log.warn({ razorpay_order_id, paymentOrderId: payment.order_id }, "Razorpay /verify: order_id mismatch");
+        return reply.status(400).send({ error: "Payment verification failed: order mismatch" });
+      }
+
+      // Verify payment is captured
+      if (payment.status !== "captured") {
+        fastify.log.warn({ razorpay_payment_id, status: payment.status }, "Razorpay /verify: payment not captured");
+        return reply.status(400).send({ error: `Payment not captured (status: ${payment.status})` });
+      }
+
+      // Verify currency
+      if (payment.currency !== "INR") {
+        fastify.log.warn({ razorpay_payment_id, currency: payment.currency }, "Razorpay /verify: unexpected currency");
+        return reply.status(400).send({ error: "Payment verification failed: unexpected currency" });
+      }
+
+      // Verify amount matches DepositRequest (in paise)
+      const deposit = await fastify.prisma.depositRequest.findFirst({
+        where: { gatewayOrderId: razorpay_order_id, userId: request.user.sub },
+        select: { amountInr: true },
+      }) as { amountInr: string | null } | null;
+
+      if (deposit?.amountInr !== null && deposit?.amountInr !== undefined) {
+        const expectedPaise = Math.round(Number(deposit.amountInr) * 100);
+        if (Math.abs(payment.amount - expectedPaise) > 1) {
+          fastify.log.warn(
+            { razorpay_payment_id, paymentPaise: payment.amount, expectedPaise },
+            "Razorpay /verify SECURITY: amount mismatch -- aborting"
+          );
+          return reply.status(400).send({ error: "Payment verification failed: amount mismatch" });
+        }
+      }
+    }
+
+    // Step 3: Atomic wallet credit (idempotent -- safe if webhook already credited)
     const result = await finalizeRazorpayDeposit(
       fastify.prisma,
       razorpay_order_id,

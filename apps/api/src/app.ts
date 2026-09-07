@@ -64,9 +64,7 @@ export async function buildApp(): Promise<FastifyInstance> {
     redis: fastify.redis,
     keyGenerator: (request) =>
       request.ip ?? request.headers["x-forwarded-for"]?.toString() ?? "unknown",
-    // Webhooks use their own per-route limits; skip global limiter to avoid
-    // blocking Razorpay/Cryptomus burst retries
-    allowList: (request) => request.url.startsWith("/webhooks/"),
+
     errorResponseBuilder: () => ({
       statusCode: 429,
       error: "Too Many Requests",

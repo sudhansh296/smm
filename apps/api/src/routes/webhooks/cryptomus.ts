@@ -5,7 +5,12 @@ import { env } from "../../lib/env.js";
 import { creditWalletTx } from "../../services/wallet.service.js";
 
 export default async function cryptomusWebhookRoute(fastify: FastifyInstance) {
-  fastify.post("/cryptomus", async (request, reply) => {
+  fastify.post("/cryptomus", {
+    config: {
+      // Explicit rate limit for Cryptomus webhooks -- handles burst retries safely
+      rateLimit: { max: 200, timeWindow: 60_000 },
+    },
+  }, async (request, reply) => {
     const body = request.body as Record<string, unknown>;
     const { sign, ...bodyWithoutSign } = body;
 
