@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -26,6 +26,7 @@ const manualSchema = z.object({
 
 export default function DepositInrPage() {
   const [tab, setTab] = useState<"razorpay" | "manual">("razorpay");
+  const qc = useQueryClient();
   const [rzpLoading, setRzpLoading] = useState(false);
   const [manualDone, setManualDone] = useState(false);
   const [manualLoading, setManualLoading] = useState(false);
@@ -50,25 +51,42 @@ export default function DepositInrPage() {
     setRzpLoading(true);
     try {
       const res = await api.post("/deposits/razorpay", { amountInr: data.amountInr });
-      const { razorpayOrderId, keyId, isMock } = res.data;
+      const { razorpayOrderId, keyId, isMock, isTestMode } = res.data;
+      // Show test mode badge
+      const badgeEl = document.getElementById("rzp-mode-badge");
+      if (badgeEl) {
+        if (isTestMode) { badgeEl.classList.remove("hidden"); badgeEl.textContent = "Test Mode -- no real money"; }
+        else { badgeEl.classList.add("hidden"); }
+      }
+
+      const handleSuccess = async (orderId: string, paymentId: string, signature: string) => {
+        try {
+          const verifyRes = await api.post("/deposits/razorpay/verify", {
+            razorpay_order_id: orderId,
+            razorpay_payment_id: paymentId,
+            razorpay_signature: signature,
+          });
+          // Refetch wallet and deposit history after successful payment
+          await qc.invalidateQueries({ queryKey: ["wallet"] });
+          await qc.invalidateQueries({ queryKey: ["deposits"] });
+          toast.success(`Wallet credited $${verifyRes.data.amountUsd}!`);
+        } catch (err) { toast.error(getErrorMessage(err)); }
+      };
 
       if (isMock) {
         toast.info("Mock mode -- simulating payment...");
         await new Promise(r => setTimeout(r, 1000));
-        const verifyRes = await api.post("/deposits/razorpay/verify", {
-          razorpay_order_id: razorpayOrderId,
-          razorpay_payment_id: `pay_mock_${Date.now()}`,
-          razorpay_signature: "mock_signature",
-        });
-        toast.success(`Wallet credited $${verifyRes.data.amountUsd}!`);
+        await handleSuccess(razorpayOrderId, `pay_mock_${Date.now()}`, "mock_signature");
         return;
       }
 
+      // Load Razorpay Checkout JS if not already loaded
       if (!window.Razorpay) {
-        await new Promise<void>((resolve) => {
+        await new Promise<void>((resolve, reject) => {
           const s = document.createElement("script");
           s.src = "https://checkout.razorpay.com/v1/checkout.js";
           s.onload = () => resolve();
+          s.onerror = () => reject(new Error("Failed to load Razorpay checkout"));
           document.body.appendChild(s);
         });
       }
@@ -82,14 +100,11 @@ export default function DepositInrPage() {
         description: "Wallet Top-up",
         theme: { color: "#6366f1" },
         handler: async (response: any) => {
-          try {
-            const verifyRes = await api.post("/deposits/razorpay/verify", {
-              razorpay_order_id: response.razorpay_order_id,
-              razorpay_payment_id: response.razorpay_payment_id,
-              razorpay_signature: response.razorpay_signature,
-            });
-            toast.success(`Wallet credited $${verifyRes.data.amountUsd}!`);
-          } catch (err) { toast.error(getErrorMessage(err)); }
+          await handleSuccess(
+            response.razorpay_order_id,
+            response.razorpay_payment_id,
+            response.razorpay_signature,
+          );
         },
         modal: { ondismiss: () => toast.info("Payment cancelled") },
       }).open();
@@ -143,7 +158,14 @@ export default function DepositInrPage() {
       {tab === "razorpay" && (
         <Card>
           <CardHeader className="pb-3">
-            <CardTitle className="text-base">Pay via Razorpay</CardTitle>
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-base">Pay via Razorpay</CardTitle>
+              {typeof window !== "undefined" && (
+                <span id="rzp-mode-badge" className="hidden text-xs px-2 py-0.5 rounded-full bg-yellow-100 text-yellow-800 border border-yellow-200 font-medium">
+                  Test Mode
+                </span>
+              )}
+            </div>
             <CardDescription>UPI - Cards - Net Banking -- Instant credit</CardDescription>
           </CardHeader>
           <CardContent>

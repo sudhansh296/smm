@@ -40,6 +40,7 @@ const envSchema = z.object({
   API_BASE_URL: z.string().url().optional(),
 
   // Razorpay
+  RAZORPAY_MODE: z.enum(["mock", "test", "live"]).default("mock"),
   RAZORPAY_KEY_ID: z.string().default("mock"),
   RAZORPAY_KEY_SECRET: z.string().default("mock"),
   RAZORPAY_WEBHOOK_SECRET: z.string().default("mock"),
@@ -77,4 +78,44 @@ function validateEnv(): Env {
 }
 
 export const env = validateEnv();
+
+// Razorpay mode startup validation
+(function validateRazorpayMode() {
+  const { NODE_ENV, RAZORPAY_MODE, RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET, RAZORPAY_WEBHOOK_SECRET } = env;
+
+  if (NODE_ENV === "production" && RAZORPAY_MODE === "mock") {
+    console.error("[FAIL] RAZORPAY_MODE=mock is not allowed in production.");
+    process.exit(1);
+  }
+
+  if (RAZORPAY_MODE === "test") {
+    if (!RAZORPAY_KEY_ID.startsWith("rzp_test_")) {
+      console.error("[FAIL] RAZORPAY_MODE=test requires RAZORPAY_KEY_ID starting with rzp_test_");
+      process.exit(1);
+    }
+    if (!RAZORPAY_KEY_SECRET || RAZORPAY_KEY_SECRET === "mock") {
+      console.error("[FAIL] RAZORPAY_MODE=test requires a real RAZORPAY_KEY_SECRET");
+      process.exit(1);
+    }
+    if (!RAZORPAY_WEBHOOK_SECRET || RAZORPAY_WEBHOOK_SECRET === "mock") {
+      console.error("[FAIL] RAZORPAY_MODE=test requires a real RAZORPAY_WEBHOOK_SECRET");
+      process.exit(1);
+    }
+  }
+
+  if (RAZORPAY_MODE === "live") {
+    if (!RAZORPAY_KEY_ID.startsWith("rzp_live_")) {
+      console.error("[FAIL] RAZORPAY_MODE=live requires RAZORPAY_KEY_ID starting with rzp_live_");
+      process.exit(1);
+    }
+    if (!RAZORPAY_KEY_SECRET || RAZORPAY_KEY_SECRET === "mock") {
+      console.error("[FAIL] RAZORPAY_MODE=live requires a real RAZORPAY_KEY_SECRET");
+      process.exit(1);
+    }
+    if (!RAZORPAY_WEBHOOK_SECRET || RAZORPAY_WEBHOOK_SECRET === "mock") {
+      console.error("[FAIL] RAZORPAY_MODE=live requires a real RAZORPAY_WEBHOOK_SECRET");
+      process.exit(1);
+    }
+  }
+})();
 

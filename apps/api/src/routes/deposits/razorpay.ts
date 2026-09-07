@@ -9,7 +9,7 @@ import type { PrismaClient } from "@nexussmm/db";
 
 // Typed result -- callers must handle all 3 cases explicitly
 type FinalizeRazorpayResult =
-  | { status: "credited";    amountUsd: string; userId: string }
+  | { status: "credited";     amountUsd: string; userId: string }
   | { status: "already_done"; amountUsd: string; userId: string }
   | { status: "not_found" };
 
@@ -36,14 +36,11 @@ export async function finalizeRazorpayDeposit(
     `;
 
     const deposit = deposits[0];
-    if (!deposit) {
-      result = { status: "not_found" };
-      return;
-    }
+    if (!deposit) { result = { status: "not_found" }; return; }
 
     // 2. Ownership check (verify path) -- prevents one user claiming another's deposit
     if (options.expectedUserId && deposit.userId !== options.expectedUserId) {
-      result = { status: "not_found" }; // treat as not found -- don't leak existence
+      result = { status: "not_found" };
       return;
     }
 
@@ -111,25 +108,25 @@ export async function finalizeRazorpayDeposit(
 }
 
 export default async function razorpayDepositRoute(fastify: FastifyInstance) {
-  const isProduction = process.env["NODE_ENV"] === "production";
-  const isMock = !isProduction && (
-    !env.RAZORPAY_KEY_ID ||
-    env.RAZORPAY_KEY_ID === "mock" ||
-    env.RAZORPAY_KEY_ID.startsWith("rzp_test_xxx")
-  );
+  const mode = env.RAZORPAY_MODE; // "mock" | "test" | "live"
+  const isMock = mode === "mock";
+  const isLive = mode === "live";
 
-  if (isProduction && (!env.RAZORPAY_KEY_ID || env.RAZORPAY_KEY_ID === "mock" || env.RAZORPAY_KEY_ID.startsWith("rzp_test_xxx"))) {
-    fastify.log.error("Razorpay mock credentials detected in production");
-    throw new Error("Payment gateway not configured for production");
+  // Startup guard: production must never use mock
+  if (env.NODE_ENV === "production" && isMock) {
+    throw new Error("RAZORPAY_MODE=mock is not allowed in production");
   }
 
   let razorpay: any = null;
   if (!isMock) {
     const { default: Razorpay } = await import("razorpay");
-    razorpay = new Razorpay({ key_id: env.RAZORPAY_KEY_ID, key_secret: env.RAZORPAY_KEY_SECRET });
+    razorpay = new Razorpay({
+      key_id:     env.RAZORPAY_KEY_ID,
+      key_secret: env.RAZORPAY_KEY_SECRET,
+    });
   }
 
-  // Create Razorpay order
+  // POST /deposits/razorpay -- create order
   fastify.post("/razorpay", { preHandler: [fastify.authenticate] }, async (request, reply) => {
     const { amountInr } = z.object({
       amountInr: z.coerce.number().min(50, "Minimum Rs.50").max(100000),
@@ -139,16 +136,19 @@ export default async function razorpayDepositRoute(fastify: FastifyInstance) {
     const amountUsd = new Decimal(amountInr).dividedBy(effectiveRate).toDecimalPlaces(8);
 
     let rzpOrderId: string;
+
     if (isMock) {
-      rzpOrderId = `rzp_mock_${Date.now()}_${Math.random().toString(36).slice(2,8)}`;
+      // Mock mode: never contacts Razorpay -- only allowed in non-production
+      rzpOrderId = `rzp_mock_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
     } else {
+      // test or live: create real Razorpay order via SDK
       const rzpOrder = await razorpay!.orders.create({
-        amount: Math.round(amountInr * 100),
+        amount:   Math.round(amountInr * 100), // paise
         currency: "INR",
-        receipt: `nexussmm_${Date.now()}`,
+        receipt:  `nexussmm_${Date.now()}`,
       });
       if (!rzpOrder?.id) throw new ValidationError("Failed to create Razorpay order");
-      rzpOrderId = rzpOrder.id;
+      rzpOrderId = rzpOrder.id as string;
     }
 
     await fastify.prisma.depositRequest.create({
@@ -167,14 +167,15 @@ export default async function razorpayDepositRoute(fastify: FastifyInstance) {
       razorpayOrderId: rzpOrderId,
       amountInr,
       currency:       "INR",
-      keyId:          env.RAZORPAY_KEY_ID,
+      keyId:          env.RAZORPAY_KEY_ID,   // only key_id exposed to frontend; secret never sent
       effectiveRate:  effectiveRate.toFixed(4),
       usdEquivalent:  amountUsd.toFixed(2),
       isMock,
+      isTestMode:     mode === "test",        // frontend uses this to show test badge
     });
   });
 
-  // Verify payment after frontend callback
+  // POST /deposits/razorpay/verify -- verify checkout signature and credit wallet
   fastify.post("/razorpay/verify", { preHandler: [fastify.authenticate] }, async (request, reply) => {
     const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = z.object({
       razorpay_order_id:   z.string(),
@@ -182,18 +183,27 @@ export default async function razorpayDepositRoute(fastify: FastifyInstance) {
       razorpay_signature:  z.string(),
     }).parse(request.body);
 
-    const isValid = isMock ? true : (() => {
-      const body     = razorpay_order_id + "|" + razorpay_payment_id;
-      const expected = createHmac("sha256", env.RAZORPAY_KEY_SECRET).update(body).digest("hex");
-      return expected === razorpay_signature;
-    })();
-    if (!isValid) return reply.status(400).send({ error: "Invalid payment signature" });
+    // Signature verification:
+    // mock: skip (no real Razorpay)
+    // test/live: always verify HMAC SHA256 -- never bypass
+    const signatureValid = isMock
+      ? true
+      : (() => {
+          const body     = razorpay_order_id + "|" + razorpay_payment_id;
+          const expected = createHmac("sha256", env.RAZORPAY_KEY_SECRET).update(body).digest("hex");
+          return expected === razorpay_signature;
+        })();
+
+    if (!signatureValid) {
+      fastify.log.warn({ razorpay_order_id }, "Razorpay /verify signature mismatch");
+      return reply.status(400).send({ error: "Invalid payment signature" });
+    }
 
     const result = await finalizeRazorpayDeposit(
       fastify.prisma,
       razorpay_order_id,
       razorpay_payment_id,
-      { expectedUserId: request.user.sub }, // ownership check
+      { expectedUserId: request.user.sub },
     );
 
     if (result.status === "not_found") {
