@@ -48,7 +48,7 @@ export default async function apiV2Route(fastify: FastifyInstance) {
           const key = body?.["key"] ?? "";
           return `apiv2:${key ? createHash("sha256").update(key).digest("hex").slice(0, 16) : req.ip}`;
         },
-        errorResponseBuilder: () => ({ error: "Rate limit exceeded. Max 60 requests per minute." }),
+        errorResponseBuilder: () => ({ statusCode: 429, error: "Too Many Requests", message: "Rate limit exceeded. Max 60 requests per minute.", code: "RATE_LIMITED" }),
       },
     },
   }, async (request, reply) => {

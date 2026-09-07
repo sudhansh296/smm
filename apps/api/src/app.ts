@@ -65,7 +65,9 @@ export async function buildApp(): Promise<FastifyInstance> {
     keyGenerator: (request) =>
       request.ip ?? request.headers["x-forwarded-for"]?.toString() ?? "unknown",
     errorResponseBuilder: () => ({
-      error: "Too many requests. Please slow down.",
+      statusCode: 429,
+      error: "Too Many Requests",
+      message: "Too many requests. Please slow down.",
       code: "RATE_LIMITED",
     }),
   });
