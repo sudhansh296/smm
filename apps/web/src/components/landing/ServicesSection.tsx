@@ -36,18 +36,20 @@ export function ServicesSection() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch(`${API_URL}/public/services`)
-      .then(r => r.json())
+    const controller = new AbortController();
+    fetch("/api/public/services", { signal: controller.signal })
+      .then(r => { if (!r.ok) throw new Error(); return r.json(); })
       .then(d => {
-        setPlatforms(d.platformSummary ?? []);
+        setPlatforms(Array.isArray(d.platformSummary) ? d.platformSummary : []);
         setTotalServices(d.totalServices ?? 0);
+        setLoading(false);
       })
-      .catch(() => {})
-      .finally(() => setLoading(false));
+      .catch(() => { setLoading(false); })
+    return () => controller.abort();
   }, []);
 
   return (
-    <section id="services" className="py-24 bg-slate-50">
+    <section id="services" className="pt-12 pb-24 bg-slate-50">
       <div className="max-w-7xl mx-auto px-4 sm:px-6">
         <div className="text-center mb-14">
           <span className="inline-block px-3 py-1 text-xs font-semibold text-primary bg-primary/10 rounded-full mb-3 uppercase tracking-wider">Our Services</span>
@@ -65,10 +67,7 @@ export function ServicesSection() {
               .flatMap(p => {
                 const cfg = PLATFORM_CONFIG[p.platform] ?? PLATFORM_CONFIG["Other"];
                 return (p.topCategories ?? []).slice(0, 2).map((cat: string) => (
-                  <div key={`${p.platform}-${cat}`} className={`flex items-center gap-2 px-3 py-1.5 rounded-full bg-gradient-to-r ${cfg.gradient} text-white text-xs font-medium shadow-sm`}>
-                    <span className="font-bold opacity-90">{cfg.abbr}</span>
-                    <span className="max-w-[160px] truncate">{cat}</span>
-                  </div>
+                  <div key={`${p.platform}-${cat}`} className={`px-4 py-1.5 rounded-full bg-gradient-to-r ${cfg.gradient} text-white text-xs font-semibold shadow-sm max-w-[200px] truncate`}>{cat}</div>
                 ));
               })}
           </div>
@@ -101,10 +100,10 @@ export function ServicesSection() {
                     {/* Platform name + featured */}
                     <div className="p-4">
                       <h3 className="font-bold text-slate-900 text-base mb-1">{p.platform}</h3>
-                      <div className="mb-4 min-h-[44px] flex flex-wrap items-center gap-x-1.5 gap-y-1">
+                      <div className="mb-4 h-[56px] overflow-hidden flex flex-wrap items-start content-start gap-x-1.5 gap-y-1">
                         {(p.topCategories ?? []).slice(0, 4).map((cat: string, i: number, arr: string[]) => (
                           <span key={cat} className="flex items-center gap-1.5">
-                            <span className="text-xs text-slate-600 font-medium">{cat.length > 18 ? cat.substring(0, 16) + "…" : cat}</span>
+                            <span className="text-xs text-slate-600 font-medium">{cat.length > 16 ? cat.substring(0, 14) + "…" : cat}</span>
                             {i < arr.length - 1 && <span className="w-1 h-1 rounded-full bg-slate-300 shrink-0" />}
                           </span>
                         ))}

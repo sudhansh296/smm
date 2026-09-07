@@ -120,9 +120,9 @@ export default function LandingPage() {
       <ServicesSection />
 
       {/* ── Features ────────────────────────────────────────────── */}
-      <section className="py-24 bg-white">
+      <section className="py-14 bg-white">
         <div className="max-w-7xl mx-auto px-4 sm:px-6">
-          <div className="text-center mb-14">
+          <div className="text-center mb-8">
             <span className="inline-block px-3 py-1 text-xs font-semibold text-primary bg-primary/10 rounded-full mb-3 uppercase tracking-wider">Why Choose Us</span>
             <h2 className="text-3xl sm:text-4xl font-bold text-slate-900 mb-4">Built for Results</h2>
             <p className="text-slate-500 text-lg max-w-2xl mx-auto">Everything you need to grow your social media presence, in one platform</p>
@@ -142,9 +142,9 @@ export default function LandingPage() {
       </section>
 
       {/* ── How it works ────────────────────────────────────────── */}
-      <section id="how-it-works" className="py-24 bg-slate-50">
+      <section id="how-it-works" className="py-14 bg-slate-50">
         <div className="max-w-7xl mx-auto px-4 sm:px-6">
-          <div className="text-center mb-14">
+          <div className="text-center mb-8">
             <span className="inline-block px-3 py-1 text-xs font-semibold text-primary bg-primary/10 rounded-full mb-3 uppercase tracking-wider">Simple Process</span>
             <h2 className="text-3xl sm:text-4xl font-bold text-slate-900 mb-4">How It Works</h2>
             <p className="text-slate-500 text-lg max-w-2xl mx-auto">Get started in minutes with our simple 5-step process</p>
@@ -178,7 +178,7 @@ export default function LandingPage() {
       </section>
 
       {/* ── API Section ─────────────────────────────────────────── */}
-      <section id="api" className="py-24 bg-gradient-to-br from-slate-900 to-indigo-900 relative overflow-hidden">
+      <section id="api" className="py-14 bg-gradient-to-br from-slate-900 to-indigo-900 relative overflow-hidden">
         <div className="absolute inset-0 opacity-10"
           style={{ backgroundImage: "radial-gradient(circle, #6366f1 1px, transparent 1px)", backgroundSize: "24px 24px" }} />
         <div className="relative max-w-4xl mx-auto px-4 sm:px-6 text-center">
@@ -203,7 +203,7 @@ export default function LandingPage() {
       </section>
 
       {/* ── Payment Methods ─────────────────────────────────────── */}
-      <section className="py-16 bg-white border-b">
+      <section className="py-8 bg-white border-b">
         <div className="max-w-5xl mx-auto px-4 sm:px-6 text-center">
           <h2 className="text-2xl font-bold text-slate-900 mb-2">Flexible Payment Methods</h2>
           <p className="text-slate-500 mb-8">No international cards needed. Pay the way you prefer.</p>
@@ -227,9 +227,9 @@ export default function LandingPage() {
       </section>
 
       {/* ── FAQ ─────────────────────────────────────────────────── */}
-      <section id="faq" className="py-24 bg-slate-50">
+      <section id="faq" className="py-14 bg-slate-50">
         <div className="max-w-3xl mx-auto px-4 sm:px-6">
-          <div className="text-center mb-14">
+          <div className="text-center mb-8">
             <span className="inline-block px-3 py-1 text-xs font-semibold text-primary bg-primary/10 rounded-full mb-3 uppercase tracking-wider">FAQ</span>
             <h2 className="text-3xl sm:text-4xl font-bold text-slate-900 mb-4">Common Questions</h2>
             <p className="text-slate-500 text-lg">Quick answers to help you get started</p>
@@ -249,7 +249,7 @@ export default function LandingPage() {
       </section>
 
       {/* ── CTA Banner ──────────────────────────────────────────── */}
-      <section className="py-20 bg-gradient-to-r from-indigo-600 to-indigo-700">
+      <section className="py-14 bg-gradient-to-r from-indigo-600 to-indigo-700">
         <div className="max-w-4xl mx-auto px-4 sm:px-6 text-center">
           <h2 className="text-3xl sm:text-4xl font-bold text-white mb-4">Ready to Grow?</h2>
           <p className="text-indigo-100 text-lg mb-8 max-w-2xl mx-auto">

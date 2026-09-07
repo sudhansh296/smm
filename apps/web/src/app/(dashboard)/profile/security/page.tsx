@@ -35,7 +35,7 @@ export default function SecurityPage() {
   });
 
   const pwMutation = useMutation({
-    mutationFn: (d: { currentPassword: string; newPassword: string }) => api.post("/auth/reset-password", d),
+    mutationFn: (d: { currentPassword: string; newPassword: string }) => api.post("/auth/change-password", d),
     onSuccess: () => { toast.success("Password changed"); reset(); },
     onError: (err) => toast.error(getErrorMessage(err)),
   });

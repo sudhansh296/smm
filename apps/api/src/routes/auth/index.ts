@@ -7,6 +7,7 @@ import verifyEmailRoute from "./verify-email.js";
 import passwordResetRoute from "./password-reset.js";
 import totpRoute from "./totp.js";
 import googleAuthRoute from "./google.js";
+import changePasswordRoute from "./change-password.js";
 
 export default async function authRoutes(fastify: FastifyInstance) {
   await fastify.register(registerRoute);
@@ -17,4 +18,5 @@ export default async function authRoutes(fastify: FastifyInstance) {
   await fastify.register(passwordResetRoute);
   await fastify.register(totpRoute);
   await fastify.register(googleAuthRoute);
+  await fastify.register(changePasswordRoute);
 }

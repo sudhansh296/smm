@@ -38,10 +38,8 @@ export default function ForgotPasswordPage() {
           <CheckCircle className="h-8 w-8 text-green-600" />
         </div>
         <h2 className="text-2xl font-bold text-slate-900 mb-2">Check your email</h2>
-        <p className="text-slate-500 text-sm mb-1">We sent a reset link to</p>
-        <p className="font-bold text-primary text-base mb-4">{getValues("email")}</p>
-        <p className="text-slate-500 text-sm mb-6">
-          Click the link in the email to reset your password. The link expires in 1 hour.
+        <p className="text-slate-500 text-sm mb-4">
+          If <strong className="text-slate-700">{getValues("email")}</strong> is registered with us, a password reset link has been sent. Please check your inbox and spam folder.
         </p>
         <div className="p-4 rounded-xl bg-blue-50 border border-blue-100 text-xs text-blue-700 mb-6 text-left">
           <p className="font-semibold mb-1">Did not receive the email?</p>

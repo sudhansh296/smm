@@ -160,6 +160,7 @@ export default async function loginRoute(fastify: FastifyInstance) {
         displayName: user.displayName,
         isAdmin: user.isAdmin,
         totpEnabled: user.totpEnabled,
+        emailVerified: user.emailVerified,
       },
     });
   });
