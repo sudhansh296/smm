@@ -8,23 +8,31 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { formatUsd, formatInr, formatDate, getStatusColor } from "@/lib/utils";
-import { RefreshCcw, XCircle } from "lucide-react";
+import { RefreshCcw, XCircle, Copy, Check } from "lucide-react";
 import { toast } from "sonner";
 
 const STATUSES = ["ALL", "PENDING", "PROCESSING", "IN_PROGRESS", "COMPLETED", "PARTIAL", "CANCEL_REQUESTED", "CANCELLED", "REFUNDED"];
 
-// Friendly display labels for internal statuses
 const STATUS_LABELS: Record<string, string> = {
-  FORWARDING:       "Placed",
-  PENDING:          "Placed",
-  PROCESSING:       "Processing",
-  IN_PROGRESS:      "In Progress",
-  COMPLETED:        "Completed",
-  PARTIAL:          "Partial",
-  CANCEL_REQUESTED: "Cancelling",
-  CANCELLED:        "Cancelled",
-  REFUNDED:         "Refunded",
+  FORWARDING: "Placed", PENDING: "Placed", PROCESSING: "Processing",
+  IN_PROGRESS: "In Progress", COMPLETED: "Completed", PARTIAL: "Partial",
+  CANCEL_REQUESTED: "Cancelling", CANCELLED: "Cancelled", REFUNDED: "Refunded",
 };
+
+function CopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  const copy = () => {
+    navigator.clipboard.writeText(text);
+    setCopied(true);
+    toast.success("Order ID copied!");
+    setTimeout(() => setCopied(false), 2000);
+  };
+  return (
+    <button onClick={copy} className="p-1 rounded hover:bg-slate-100 transition-colors text-muted-foreground hover:text-foreground" title="Copy Order ID">
+      {copied ? <Check className="h-3 w-3 text-green-500" /> : <Copy className="h-3 w-3" />}
+    </button>
+  );
+}
 
 export default function OrdersPage() {
   const [status, setStatus] = useState("ALL");
@@ -33,12 +41,10 @@ export default function OrdersPage() {
 
   const { data, isLoading } = useQuery({
     queryKey: ["orders", { status, page }],
-    queryFn: () =>
-      api.get("/user/orders", {
-        params: { status: status === "ALL" ? undefined : status, page, limit: 20 },
-      }).then((r) => r.data),
+    queryFn: () => api.get("/user/orders", {
+      params: { status: status === "ALL" ? undefined : status, page, limit: 20 },
+    }).then((r) => r.data),
     placeholderData: (prev) => prev,
-    // Fix 6: auto-refresh every 30s so PENDING->PROCESSING->COMPLETED updates without manual reload
     refetchInterval: 30_000,
     staleTime: 0,
   });
@@ -63,9 +69,7 @@ export default function OrdersPage() {
           <p className="text-muted-foreground mt-1 text-sm">Track your order history</p>
         </div>
         <Select value={status} onValueChange={(v) => { setStatus(v); setPage(1); }}>
-          <SelectTrigger className="w-full sm:w-[180px]">
-            <SelectValue />
-          </SelectTrigger>
+          <SelectTrigger className="w-full sm:w-[180px]"><SelectValue /></SelectTrigger>
           <SelectContent>
             {STATUSES.map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
           </SelectContent>
@@ -87,6 +91,15 @@ export default function OrdersPage() {
           }) => (
             <Card key={order.id}>
               <CardContent className="p-4">
+                {/* Order ID bar */}
+                <div className="flex items-center gap-1.5 mb-3 pb-2.5 border-b border-dashed">
+                  <span className="text-xs text-muted-foreground font-medium">Order ID:</span>
+                  <code className="text-xs font-mono text-slate-700 bg-slate-100 px-2 py-0.5 rounded select-all">
+                    {order.id}
+                  </code>
+                  <CopyButton text={order.id} />
+                </div>
+
                 <div className="flex items-start justify-between gap-3">
                   <div className="space-y-1 flex-1 min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
@@ -108,9 +121,7 @@ export default function OrdersPage() {
                       <span className="hidden sm:inline">
                         Cost: <strong>{formatUsd(order.costUsd)}</strong> ({formatInr(order.costInr)})
                       </span>
-                      <span className="sm:hidden">
-                        <strong>{formatUsd(order.costUsd)}</strong>
-                      </span>
+                      <span className="sm:hidden"><strong>{formatUsd(order.costUsd)}</strong></span>
                       {order.remains !== null && (
                         <span>Remains: <strong>{order.remains}</strong></span>
                       )}
@@ -123,8 +134,7 @@ export default function OrdersPage() {
                       <Button size="sm" variant="outline"
                         onClick={() => cancelMutation.mutate(order.id)}
                         disabled={cancelMutation.isPending}
-                        className="text-xs h-8 px-2"
-                      >
+                        className="text-xs h-8 px-2">
                         <XCircle className="h-3 w-3 sm:mr-1" />
                         <span className="hidden sm:inline">Cancel</span>
                       </Button>
@@ -133,8 +143,7 @@ export default function OrdersPage() {
                       <Button size="sm" variant="outline"
                         onClick={() => refillMutation.mutate(order.id)}
                         disabled={refillMutation.isPending}
-                        className="text-xs h-8 px-2"
-                      >
+                        className="text-xs h-8 px-2">
                         <RefreshCcw className="h-3 w-3 sm:mr-1" />
                         <span className="hidden sm:inline">Refill</span>
                       </Button>
@@ -149,15 +158,9 @@ export default function OrdersPage() {
 
       {data && data.totalPages > 1 && (
         <div className="flex justify-center gap-2">
-          <Button variant="outline" size="sm" disabled={page === 1} onClick={() => setPage(page - 1)}>
-            Previous
-          </Button>
-          <span className="px-3 py-2 text-sm text-muted-foreground">
-            {page} / {data.totalPages}
-          </span>
-          <Button variant="outline" size="sm" disabled={page === data.totalPages} onClick={() => setPage(page + 1)}>
-            Next
-          </Button>
+          <Button variant="outline" size="sm" disabled={page === 1} onClick={() => setPage(page - 1)}>Previous</Button>
+          <span className="px-3 py-2 text-sm text-muted-foreground">{page} / {data.totalPages}</span>
+          <Button variant="outline" size="sm" disabled={page === data.totalPages} onClick={() => setPage(page + 1)}>Next</Button>
         </div>
       )}
     </div>
