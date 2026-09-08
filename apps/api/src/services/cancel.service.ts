@@ -175,7 +175,7 @@ export async function cancelOrder(
         userId: order.userId,
         amountUsd: new Decimal(order.costUsd.toString()),
         inrRate: new Decimal(order.inrRateAtOrder.toString()),
-        description: `Refund: order #${orderId.slice(-8)} cancelled (not forwarded to provider)`,
+        description: `Refund: order #${orderId.slice(-8)} cancelled`,
       });
       await tx.notification.create({ data: { userId: order.userId, message: `Order #${orderId.slice(-8)} cancelled. $${new Decimal(order.costUsd.toString()).toFixed(2)} refunded.` } });
       return true;
