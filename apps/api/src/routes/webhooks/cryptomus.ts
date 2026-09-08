@@ -27,21 +27,70 @@ export default async function cryptomusWebhookRoute(fastify: FastifyInstance) {
       return reply.status(400).send({ error: "Invalid signature" });
     }
 
-    if (body["status"] !== "paid" && body["status"] !== "paid_over") {
+    const cryptomusStatus = body["status"] as string;
+    const cryptomusUuid   = body["uuid"] as string;
+
+    if (!cryptomusUuid) {
+      return reply.status(400).send({ error: "Invalid payload: missing uuid" });
+    }
+
+    // Handle non-paid terminal statuses -- mark deposit, no wallet credit
+    if (cryptomusStatus === "fail" || cryptomusStatus === "failed") {
+      const d = await fastify.prisma.depositRequest.findFirst({
+        where: { gatewayOrderId: cryptomusUuid },
+        select: { id: true, status: true },
+      }) as any;
+      if (d && d.status === "PENDING") {
+        await fastify.prisma.depositRequest.update({
+          where: { id: d.id },
+          data:  { status: "FAILED" as never },
+        });
+      }
       return reply.status(200).send({ ok: true });
     }
 
-    const cryptomusUuid = body["uuid"] as string;
-    const usdtAmount = parseFloat(body["amount"] as string);
-
-    if (!cryptomusUuid || isNaN(usdtAmount)) {
-      return reply.status(400).send({ error: "Invalid payload" });
+    if (cryptomusStatus === "cancel" || cryptomusStatus === "cancelled") {
+      const d = await fastify.prisma.depositRequest.findFirst({
+        where: { gatewayOrderId: cryptomusUuid },
+        select: { id: true, status: true },
+      }) as any;
+      if (d && d.status === "PENDING") {
+        await fastify.prisma.depositRequest.update({
+          where: { id: d.id },
+          data:  { status: "CANCELLED" as never },
+        });
+      }
+      return reply.status(200).send({ ok: true });
     }
 
-    // Fully atomic: idempotency + wallet credit + deposit complete  --  single transaction
+    if (cryptomusStatus === "expired") {
+      const d = await fastify.prisma.depositRequest.findFirst({
+        where: { gatewayOrderId: cryptomusUuid },
+        select: { id: true, status: true },
+      }) as any;
+      if (d && d.status === "PENDING") {
+        await fastify.prisma.depositRequest.update({
+          where: { id: d.id },
+          data:  { status: "EXPIRED" as never },
+        });
+      }
+      return reply.status(200).send({ ok: true });
+    }
+
+    // Only credit wallet for paid/paid_over
+    if (cryptomusStatus !== "paid" && cryptomusStatus !== "paid_over") {
+      return reply.status(200).send({ ok: true });
+    }
+
+    const usdtAmount = parseFloat(body["amount"] as string);
+    if (isNaN(usdtAmount)) {
+      return reply.status(400).send({ error: "Invalid payload: bad amount" });
+    }
+
+    // Fully atomic: idempotency + wallet credit + deposit complete
     await fastify.prisma.$transaction(async (tx) => {
       const existing = await tx.transaction.findUnique({ where: { paymentGatewayId: cryptomusUuid } });
-      if (existing) return; // Already processed
+      if (existing) return;
 
       const deposit = await tx.depositRequest.findUnique({ where: { gatewayOrderId: cryptomusUuid } });
       if (!deposit || deposit.status === "COMPLETED") return;

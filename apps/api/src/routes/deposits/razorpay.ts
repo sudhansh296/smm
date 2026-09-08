@@ -267,4 +267,29 @@ export default async function razorpayDepositRoute(fastify: FastifyInstance) {
     }
     return reply.send({ message: "Payment verified. Wallet credited.", amountUsd: result.amountUsd });
   });
+  // POST /deposits/razorpay/cancel -- user cancels a PENDING deposit (e.g. modal dismiss)
+  fastify.post("/razorpay/cancel", { preHandler: [fastify.authenticate] }, async (request, reply) => {
+    const { razorpayOrderId } = z.object({
+      razorpayOrderId: z.string().min(1),
+    }).parse(request.body);
+
+    const deposit = await fastify.prisma.depositRequest.findFirst({
+      where: { gatewayOrderId: razorpayOrderId },
+      select: { id: true, userId: true, gateway: true, status: true },
+    }) as any;
+
+    if (!deposit) return reply.status(404).send({ error: "Deposit not found" });
+    if (deposit.userId !== request.user.sub) return reply.status(404).send({ error: "Deposit not found" });
+    if (deposit.gateway !== "razorpay") return reply.status(400).send({ error: "Not a Razorpay deposit" });
+    if (deposit.status === "COMPLETED") return reply.status(400).send({ error: "Cannot cancel a completed deposit" });
+    if (deposit.status !== "PENDING") return reply.send({ message: "Already cancelled or failed" });
+
+    await fastify.prisma.depositRequest.update({
+      where: { id: deposit.id },
+      data:  { status: "CANCELLED" as never },
+    });
+
+    return reply.send({ message: "Deposit cancelled" });
+  });
+
 }

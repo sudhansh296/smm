@@ -106,7 +106,13 @@ export default function DepositInrPage() {
             response.razorpay_signature,
           );
         },
-        modal: { ondismiss: () => toast.info("Payment cancelled") },
+        modal: { ondismiss: async () => {
+          toast.info("Payment cancelled");
+          try {
+            await api.post("/deposits/razorpay/cancel", { razorpayOrderId });
+            await qc.invalidateQueries({ queryKey: ["deposits"] });
+          } catch { /* ignore cancel errors */ }
+        } },
       }).open();
     } catch (err) { toast.error(getErrorMessage(err)); }
     finally { setRzpLoading(false); }

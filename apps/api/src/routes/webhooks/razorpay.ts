@@ -47,7 +47,26 @@ export default async function razorpayWebhookRoute(fastify: FastifyInstance) {
       payload?: { payment?: { entity?: { id: string; order_id: string; amount: number; currency: string } } };
     };
 
-    // 3. Only process payment.captured -- ack all other valid signed events
+    // 3. Route by event type
+    if (event.event === "payment.failed") {
+      const failedEntity = event.payload?.payment?.entity;
+      if (failedEntity?.order_id) {
+        const deposit = await fastify.prisma.depositRequest.findFirst({
+          where: { gatewayOrderId: failedEntity.order_id },
+          select: { id: true, status: true, gateway: true },
+        }) as any;
+        if (deposit && deposit.gateway === "razorpay" && deposit.status === "PENDING") {
+          await fastify.prisma.depositRequest.update({
+            where: { id: deposit.id },
+            data:  { status: "FAILED" as never },
+          });
+          fastify.log.info({ orderId: failedEntity.order_id }, "Razorpay webhook: deposit marked FAILED");
+        }
+      }
+      return reply.status(200).send({ ok: true });
+    }
+
+    // Only process payment.captured for wallet credit
     if (event.event !== "payment.captured") {
       return reply.status(200).send({ ok: true });
     }
