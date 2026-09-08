@@ -43,7 +43,7 @@ export default async function cryptomusWebhookRoute(fastify: FastifyInstance) {
       if (d && d.status === "PENDING") {
         await fastify.prisma.depositRequest.update({
           where: { id: d.id },
-          data:  { status: "FAILED" as any },
+          data:  { status: "FAILED" },
         });
       }
       return reply.status(200).send({ ok: true });
@@ -57,7 +57,7 @@ export default async function cryptomusWebhookRoute(fastify: FastifyInstance) {
       if (d && d.status === "PENDING") {
         await fastify.prisma.depositRequest.update({
           where: { id: d.id },
-          data:  { status: "CANCELLED" as any },
+          data:  { status: "CANCELLED" },
         });
       }
       return reply.status(200).send({ ok: true });
@@ -71,7 +71,7 @@ export default async function cryptomusWebhookRoute(fastify: FastifyInstance) {
       if (d && d.status === "PENDING") {
         await fastify.prisma.depositRequest.update({
           where: { id: d.id },
-          data:  { status: "EXPIRED" as any },
+          data:  { status: "EXPIRED" },
         });
       }
       return reply.status(200).send({ ok: true });

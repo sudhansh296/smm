@@ -294,6 +294,7 @@ enum DepositStatus {
   PENDING
   COMPLETED
   FAILED
+  CANCELLED
   EXPIRED
 }
 
