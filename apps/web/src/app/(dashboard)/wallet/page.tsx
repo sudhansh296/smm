@@ -6,46 +6,58 @@ import Link from "next/link";
 import { api } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { formatUsd, formatInr, formatDate } from "@/lib/utils";
-import { Wallet, ArrowUpRight, ArrowDownLeft, RefreshCcw, Settings, Plus, CreditCard, IndianRupee, Bitcoin } from "lucide-react";
+import { Wallet, ArrowUpRight, ArrowDownLeft, RefreshCcw, Settings, Plus, CreditCard, Bitcoin, Clock, XCircle } from "lucide-react";
 
-const TX_TYPE_ICONS: Record<string, React.ReactNode> = {
+// ── Icon map ──────────────────────────────────────────────────────
+const TX_ICON: Record<string, React.ReactNode> = {
   DEPOSIT_INR:      <ArrowDownLeft className="h-4 w-4 text-green-600" />,
   DEPOSIT_USDT:     <ArrowDownLeft className="h-4 w-4 text-green-600" />,
-  ORDER_CHARGE:     <ArrowUpRight className="h-4 w-4 text-red-600" />,
-  REFUND:           <RefreshCcw className="h-4 w-4 text-blue-600" />,
-  ADMIN_ADJUSTMENT: <Settings className="h-4 w-4 text-orange-600" />,
+  ORDER_CHARGE:     <ArrowUpRight  className="h-4 w-4 text-red-600" />,
+  REFUND:           <RefreshCcw    className="h-4 w-4 text-blue-600" />,
+  ADMIN_ADJUSTMENT: <Settings      className="h-4 w-4 text-orange-600" />,
 };
 
-const DEPOSIT_STATUS_BADGE: Record<string, { label: string; className: string }> = {
-  COMPLETED: { label: "Completed", className: "bg-green-100 text-green-800 border-green-200" },
-  PENDING:   { label: "Pending",   className: "bg-yellow-100 text-yellow-800 border-yellow-200" },
-  FAILED:    { label: "Failed",    className: "bg-red-100 text-red-800 border-red-200" },
-  CANCELLED: { label: "Cancelled", className: "bg-slate-100 text-slate-600 border-slate-200" },
-  EXPIRED:   { label: "Expired",   className: "bg-slate-100 text-slate-500 border-slate-200" },
+function activityIcon(item: ActivityItem) {
+  if (item.source === "deposit") {
+    if (item.status === "PENDING")   return <Clock   className="h-4 w-4 text-yellow-500" />;
+    if (item.status === "FAILED")    return <XCircle className="h-4 w-4 text-red-500" />;
+    if (item.status === "CANCELLED") return <XCircle className="h-4 w-4 text-slate-400" />;
+    if (item.status === "EXPIRED")   return <XCircle className="h-4 w-4 text-slate-400" />;
+    if (item.gateway === "razorpay") return <CreditCard className="h-4 w-4 text-blue-600" />;
+    return <Bitcoin className="h-4 w-4 text-purple-600" />;
+  }
+  return TX_ICON[item.type] ?? <ArrowDownLeft className="h-4 w-4 text-muted-foreground" />;
+}
+
+// ── Status badge ─────────────────────────────────────────────────
+const STATUS_BADGE: Record<string, string> = {
+  COMPLETED: "bg-green-100 text-green-800 border-green-200",
+  PENDING:   "bg-yellow-100 text-yellow-800 border-yellow-200",
+  FAILED:    "bg-red-100 text-red-700 border-red-200",
+  CANCELLED: "bg-slate-100 text-slate-500 border-slate-200",
+  EXPIRED:   "bg-slate-100 text-slate-400 border-slate-200",
 };
 
-const GATEWAY_ICON: Record<string, React.ReactNode> = {
-  razorpay:   <CreditCard className="h-4 w-4 text-blue-600" />,
-  manual_inr: <IndianRupee className="h-4 w-4 text-indigo-600" />,
-  manual_usdt:<Bitcoin className="h-4 w-4 text-orange-500" />,
-  cryptomus:  <Bitcoin className="h-4 w-4 text-purple-600" />,
-};
-
-function depositGatewayLabel(gateway: string, method: string): string {
-  if (method === "MANUAL_INR")  return "Manual Bank Transfer";
-  if (method === "MANUAL_USDT") return "Manual USDT";
-  if (gateway === "razorpay")   return "Razorpay";
-  if (gateway === "cryptomus")  return "Cryptomus (USDT)";
-  return gateway;
+// ── Types ─────────────────────────────────────────────────────────
+interface ActivityItem {
+  id:          string;
+  source:      "transaction" | "deposit";
+  type:        string;
+  gateway:     string | null;
+  method:      string | null;
+  status:      string;
+  amountUsd:   string | null;
+  amountInr:   string | null;
+  description: string;
+  balanceAfter: string | null;
+  createdAt:   string;
 }
 
 export default function WalletPage() {
   const [txType, setTxType] = useState("ALL");
-  const [txPage, setTxPage] = useState(1);
-  const [depPage, setDepPage] = useState(1);
+  const [page, setPage] = useState(1);
 
   const { data: wallet } = useQuery({
     queryKey: ["wallet"],
@@ -55,20 +67,10 @@ export default function WalletPage() {
     staleTime: 0,
   });
 
-  const { data: txData, isLoading: txLoading } = useQuery({
-    queryKey: ["transactions", { txType, page: txPage }],
+  const { data: txData, isLoading } = useQuery({
+    queryKey: ["transactions", { txType, page }],
     queryFn: () => api.get("/user/transactions", {
-      params: { type: txType === "ALL" ? undefined : txType, page: txPage, limit: 20 },
-    }).then((r) => r.data),
-    placeholderData: (prev) => prev,
-    staleTime: 0,
-    refetchOnWindowFocus: true,
-  });
-
-  const { data: depData, isLoading: depLoading } = useQuery({
-    queryKey: ["deposits", { page: depPage }],
-    queryFn: () => api.get("/user/deposits", {
-      params: { page: depPage, limit: 20 },
+      params: { type: txType === "ALL" ? undefined : txType, page, limit: 20 },
     }).then((r) => r.data),
     placeholderData: (prev) => prev,
     staleTime: 0,
@@ -102,82 +104,21 @@ export default function WalletPage() {
       {/* Deposit buttons */}
       <div className="grid grid-cols-2 gap-3 sm:flex sm:gap-3">
         <Button asChild className="w-full sm:w-auto">
-          <Link href="/wallet/deposit-inr">
-            <Plus className="h-4 w-4 mr-2" />Deposit INR
-          </Link>
+          <Link href="/wallet/deposit-inr"><Plus className="h-4 w-4 mr-2" />Deposit INR</Link>
         </Button>
         <Button asChild variant="outline" className="w-full sm:w-auto">
-          <Link href="/wallet/deposit-usdt">
-            <Plus className="h-4 w-4 mr-2" />Deposit USDT
-          </Link>
+          <Link href="/wallet/deposit-usdt"><Plus className="h-4 w-4 mr-2" />Deposit USDT</Link>
         </Button>
       </div>
 
-      {/* Deposit History */}
-      <Card>
-        <CardHeader className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3">
-          <CardTitle className="text-base sm:text-lg">Deposit History</CardTitle>
-        </CardHeader>
-        <CardContent className="p-0">
-          {depLoading ? (
-            <div className="flex justify-center py-8">
-              <div className="animate-spin h-6 w-6 border-4 border-primary border-t-transparent rounded-full" />
-            </div>
-          ) : !depData?.deposits?.length ? (
-            <p className="text-center text-muted-foreground py-8 text-sm">No deposits yet</p>
-          ) : (
-            <div className="divide-y">
-              {depData.deposits.map((d: {
-                id: string; gateway: string; method: string;
-                amountInr: string | null; amountUsdt: string | null;
-                status: string; createdAt: string;
-              }) => {
-                const badge = DEPOSIT_STATUS_BADGE[d.status] ?? { label: d.status, className: "bg-slate-100 text-slate-600" };
-                const icon  = GATEWAY_ICON[d.gateway] ?? <CreditCard className="h-4 w-4 text-muted-foreground" />;
-                const amount = d.amountInr
-                  ? `Rs.${Number(d.amountInr).toFixed(2)}`
-                  : d.amountUsdt
-                  ? `$${Number(d.amountUsdt).toFixed(2)} USDT`
-                  : "--";
-
-                return (
-                  <div key={d.id} className="flex items-center justify-between p-3 sm:p-4 gap-3 hover:bg-muted/30">
-                    <div className="flex items-center gap-3 min-w-0">
-                      <div className="p-2 rounded-full bg-muted shrink-0">{icon}</div>
-                      <div className="min-w-0">
-                        <p className="text-sm font-medium truncate">{depositGatewayLabel(d.gateway, d.method)}</p>
-                        <p className="text-xs text-muted-foreground">{formatDate(d.createdAt)}</p>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2 shrink-0">
-                      <span className="text-sm font-semibold">{amount}</span>
-                      <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${badge.className}`}>
-                        {badge.label}
-                      </span>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-          {depData && depData.totalPages > 1 && (
-            <div className="flex justify-center gap-2 p-4 border-t">
-              <Button variant="outline" size="sm" disabled={depPage === 1} onClick={() => setDepPage(depPage - 1)}>Previous</Button>
-              <span className="px-3 py-2 text-sm text-muted-foreground">{depPage} / {depData.totalPages}</span>
-              <Button variant="outline" size="sm" disabled={depPage === depData.totalPages} onClick={() => setDepPage(depPage + 1)}>Next</Button>
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* Transaction History (wallet ledger - unchanged) */}
+      {/* Unified Transaction History */}
       <Card>
         <CardHeader className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3">
           <CardTitle className="text-base sm:text-lg">Transaction History</CardTitle>
-          <Select value={txType} onValueChange={(v) => { setTxType(v); setTxPage(1); }}>
+          <Select value={txType} onValueChange={(v) => { setTxType(v); setPage(1); }}>
             <SelectTrigger className="w-full sm:w-[200px]"><SelectValue /></SelectTrigger>
             <SelectContent>
-              <SelectItem value="ALL">All Types</SelectItem>
+              <SelectItem value="ALL">All Activity</SelectItem>
               <SelectItem value="DEPOSIT_INR">INR Deposits</SelectItem>
               <SelectItem value="DEPOSIT_USDT">USDT Deposits</SelectItem>
               <SelectItem value="ORDER_CHARGE">Order Charges</SelectItem>
@@ -187,43 +128,68 @@ export default function WalletPage() {
           </Select>
         </CardHeader>
         <CardContent className="p-0">
-          {txLoading ? (
+          {isLoading ? (
             <div className="flex justify-center py-8">
               <div className="animate-spin h-6 w-6 border-4 border-primary border-t-transparent rounded-full" />
             </div>
           ) : !txData?.transactions?.length ? (
-            <p className="text-center text-muted-foreground py-8 text-sm">No transactions yet</p>
+            <p className="text-center text-muted-foreground py-8 text-sm">No activity yet</p>
           ) : (
             <div className="divide-y">
-              {txData.transactions.map((tx: {
-                id: string; type: string; amountUsd: string; amountInr: string | null;
-                description: string; balanceAfter: string; createdAt: string;
-              }) => (
-                <div key={tx.id} className="flex items-center justify-between p-3 sm:p-4 gap-3 hover:bg-muted/30">
-                  <div className="flex items-center gap-3 min-w-0">
-                    <div className="p-2 rounded-full bg-muted shrink-0">
-                      {TX_TYPE_ICONS[tx.type]}
+              {(txData.transactions as ActivityItem[]).map((item) => {
+                const badge     = STATUS_BADGE[item.status] ?? STATUS_BADGE["EXPIRED"];
+                const isCredit  = item.source === "transaction" && Number(item.amountUsd) > 0;
+                const isDebit   = item.source === "transaction" && Number(item.amountUsd) < 0;
+                const isAttempt = item.source === "deposit"; // no wallet movement
+
+                return (
+                  <div key={`${item.source}:${item.id}`} className="flex items-center justify-between p-3 sm:p-4 gap-3 hover:bg-muted/30">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div className="p-2 rounded-full bg-muted shrink-0">
+                        {activityIcon(item)}
+                      </div>
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <p className="text-sm font-medium truncate">{item.description}</p>
+                          <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${badge}`}>
+                            {item.status.charAt(0) + item.status.slice(1).toLowerCase()}
+                          </span>
+                        </div>
+                        <p className="text-xs text-muted-foreground">{formatDate(item.createdAt)}</p>
+                      </div>
                     </div>
-                    <div className="min-w-0">
-                      <p className="text-sm font-medium truncate">{tx.description}</p>
-                      <p className="text-xs text-muted-foreground">{formatDate(tx.createdAt)}</p>
+                    <div className="text-right shrink-0">
+                      {isAttempt ? (
+                        // Deposit attempt — show INR/USDT amount but NO USD credit
+                        <p className="text-sm font-medium text-muted-foreground">
+                          {item.amountInr
+                            ? `Rs.${Number(item.amountInr).toFixed(2)}`
+                            : item.amountUsd
+                            ? `$${Number(item.amountUsd).toFixed(2)}`
+                            : "--"}
+                        </p>
+                      ) : (
+                        // Real wallet transaction
+                        <>
+                          <p className={`font-semibold text-sm ${isCredit ? "text-green-600" : isDebit ? "text-red-600" : "text-foreground"}`}>
+                            {isCredit ? "+" : ""}{formatUsd(item.amountUsd ?? "0")}
+                          </p>
+                          {item.amountInr && (
+                            <p className="text-xs text-muted-foreground">{formatInr(item.amountInr)}</p>
+                          )}
+                        </>
+                      )}
                     </div>
                   </div>
-                  <div className="text-right shrink-0">
-                    <p className={`font-semibold text-sm ${Number(tx.amountUsd) >= 0 ? "text-green-600" : "text-red-600"}`}>
-                      {Number(tx.amountUsd) >= 0 ? "+" : ""}{formatUsd(tx.amountUsd)}
-                    </p>
-                    {tx.amountInr && <p className="text-xs text-muted-foreground">{formatInr(tx.amountInr)}</p>}
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
           {txData && txData.totalPages > 1 && (
             <div className="flex justify-center gap-2 p-4 border-t">
-              <Button variant="outline" size="sm" disabled={txPage === 1} onClick={() => setTxPage(txPage - 1)}>Previous</Button>
-              <span className="px-3 py-2 text-sm text-muted-foreground">{txPage} / {txData.totalPages}</span>
-              <Button variant="outline" size="sm" disabled={txPage === txData.totalPages} onClick={() => setTxPage(txPage + 1)}>Next</Button>
+              <Button variant="outline" size="sm" disabled={page === 1} onClick={() => setPage(page - 1)}>Previous</Button>
+              <span className="px-3 py-2 text-sm text-muted-foreground">{page} / {txData.totalPages}</span>
+              <Button variant="outline" size="sm" disabled={page === txData.totalPages} onClick={() => setPage(page + 1)}>Next</Button>
             </div>
           )}
         </CardContent>
