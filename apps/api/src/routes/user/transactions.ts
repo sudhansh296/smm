@@ -1,6 +1,5 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
-import { Decimal } from "decimal.js";
 
 const querySchema = z.object({
   page:  z.coerce.number().min(1).default(1),
