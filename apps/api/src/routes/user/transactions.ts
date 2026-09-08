@@ -116,6 +116,7 @@ function normalizeDeposit(d: any) {
     method:      d.method as string | null,
     status:      d.status as string,
     amountUsd:   null as null,     // NOT a wallet credit -- do not show as +$X
+    approxUsd:   amountUsd,           // display only -- no wallet movement
     amountInr:   d.amountInr?.toString() ?? null,
     description,
     balanceAfter: null as null,    // no balance change

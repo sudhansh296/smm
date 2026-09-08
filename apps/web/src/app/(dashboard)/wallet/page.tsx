@@ -52,6 +52,7 @@ interface ActivityItem {
   amountInr:   string | null;
   description: string;
   balanceAfter: string | null;
+  approxUsd:   string | null;
   createdAt:   string;
 }
 
@@ -161,13 +162,11 @@ export default function WalletPage() {
                     <div className="text-right shrink-0">
                       {isAttempt ? (
                         // Deposit attempt — show INR/USDT amount but NO USD credit
-                        <p className="text-sm font-medium text-muted-foreground">
-                          {item.amountInr
-                            ? `Rs.${Number(item.amountInr).toFixed(2)}`
-                            : item.amountUsd
-                            ? `$${Number(item.amountUsd).toFixed(2)}`
-                            : "--"}
-                        </p>
+                        <div className="text-right">
+                          <p className="font-semibold text-sm text-muted-foreground">
+                            {item.approxUsd ? formatUsd(item.approxUsd) : "--"}
+                          </p>
+                        </div>
                       ) : (
                         // Real wallet transaction
                         <>
