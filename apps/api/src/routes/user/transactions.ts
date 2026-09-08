@@ -12,56 +12,214 @@ export default async function transactionsRoute(fastify: FastifyInstance) {
   fastify.get("/transactions", { preHandler: [fastify.authenticate] }, async (request, reply) => {
     const q = querySchema.parse(request.query);
     const userId = request.user.sub;
+    const offset = (q.page - 1) * q.limit;
 
-    // If a specific TX type filter is applied, return pure transaction ledger (existing behaviour)
-    if (q.type) {
-      const skip = (q.page - 1) * q.limit;
+    // Pure-ledger filters: ORDER_CHARGE, REFUND, ADMIN_ADJUSTMENT
+    // These only exist in Transaction table -- no DepositRequest to merge
+    const pureLedgerTypes = ["ORDER_CHARGE", "REFUND", "ADMIN_ADJUSTMENT"];
+    if (q.type && pureLedgerTypes.includes(q.type)) {
       const where = { userId, type: q.type as never };
       const [transactions, total] = await Promise.all([
-        fastify.prisma.transaction.findMany({ where, orderBy: { createdAt: "desc" }, skip, take: q.limit }),
+        fastify.prisma.transaction.findMany({
+          where,
+          orderBy: { createdAt: "desc" },
+          skip:    offset,
+          take:    q.limit,
+        }),
         fastify.prisma.transaction.count({ where }),
       ]);
       return reply.send({
-        transactions: transactions.map(normalizeTransaction),
-        total, page: q.page, limit: q.limit, totalPages: Math.ceil(total / q.limit),
+        transactions: transactions.map(normalizeTx),
+        total, page: q.page, limit: q.limit,
+        totalPages: Math.ceil(total / q.limit),
       });
     }
 
-    // Unified feed: merge Transaction ledger + non-completed DepositRequests
-    // Fetch all of the user's transactions and non-completed deposits in parallel
-    const [allTxs, pendingDeposits] = await Promise.all([
-      fastify.prisma.transaction.findMany({
-        where:   { userId },
-        orderBy: { createdAt: "desc" },
-        take:    500, // cap to avoid loading too many
-      }),
-      // Only show PENDING/FAILED/CANCELLED/EXPIRED deposits (COMPLETED already has a TX row)
-      fastify.prisma.depositRequest.findMany({
-        where: {
-          userId,
-          status: { in: ["PENDING", "FAILED", "CANCELLED", "EXPIRED"] as never[] },
-        },
-        orderBy: { createdAt: "desc" },
-        take: 200,
-      }),
-    ]);
+    // Deposit filters (DEPOSIT_INR / DEPOSIT_USDT) or ALL:
+    // Merge Transaction ledger (completed deposits + charges) with
+    // DepositRequest non-completed attempts using DB-level UNION ALL + pagination
 
-    // Normalise both into a common shape
-    const txItems = allTxs.map(normalizeTransaction);
-    const depItems = (pendingDeposits as any[]).map(normalizeDeposit);
+    // Determine which gateway/methods map to INR vs USDT for DepositRequest filter
+    // INR: method IN (MANUAL_INR, RAZORPAY, AUTO) and gateway IN (razorpay, manual_inr)
+    // USDT: method IN (MANUAL_USDT) or gateway IN (cryptomus, manual_usdt)
 
-    // Merge and sort by createdAt descending
-    const merged = [...txItems, ...depItems].sort(
-      (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-    );
+    // Build UNION ALL query using raw SQL for proper DB-side pagination
+    // Row shape: id, source, type, status, amount_usd, amount_inr, approx_usd,
+    //            description, balance_after, gateway, method, created_at
 
-    // Paginate the merged result
-    const total = merged.length;
-    const skip  = (q.page - 1) * q.limit;
-    const page  = merged.slice(skip, skip + q.limit);
+    let rows: any[];
+    let total: number;
+
+    if (q.type === "DEPOSIT_INR" || q.type === "DEPOSIT_USDT") {
+      // Tx side: only matching type
+      // Deposit side: filter by gateway/method
+      const isInr = q.type === "DEPOSIT_INR";
+
+      // Count
+      const [txCount, depCount] = await Promise.all([
+        fastify.prisma.transaction.count({
+          where: { userId, type: q.type as never },
+        }),
+        fastify.prisma.depositRequest.count({
+          where: {
+            userId,
+            status: { in: ["PENDING", "FAILED", "CANCELLED", "EXPIRED"] as never[] },
+            ...(isInr
+              ? { gateway: { in: ["razorpay", "manual_inr"] } }
+              : { gateway: { in: ["cryptomus", "manual_usdt"] } }),
+          },
+        }),
+      ]);
+      total = txCount + depCount;
+
+      // Fetch paginated via UNION ALL raw SQL
+      rows = await fastify.prisma.$queryRaw`
+        SELECT * FROM (
+          SELECT
+            t.id,
+            'transaction'::text   AS source,
+            t.type::text          AS type,
+            'COMPLETED'::text     AS status,
+            t."amountUsd"::text   AS amount_usd,
+            t."amountInr"::text   AS amount_inr,
+            NULL::text            AS approx_usd,
+            t.description         AS description,
+            t."balanceAfter"::text AS balance_after,
+            t."orderId"           AS order_id,
+            NULL::text            AS gateway,
+            NULL::text            AS method,
+            t."createdAt"         AS created_at
+          FROM transactions t
+          WHERE t."userId" = ${userId}
+            AND t.type = ${q.type}::\"TransactionType\"
+          UNION ALL
+          SELECT
+            d.id,
+            'deposit'::text       AS source,
+            ${isInr ? 'DEPOSIT_INR' : 'DEPOSIT_USDT'}::text AS type,
+            d.status::text        AS status,
+            NULL::text            AS amount_usd,
+            d."amountInr"::text   AS amount_inr,
+            CASE
+              WHEN d."amountUsdt" IS NOT NULL
+                THEN d."amountUsdt"::text
+              WHEN d."amountInr" IS NOT NULL AND d."inrRateSnapshot" IS NOT NULL
+                THEN (d."amountInr" / d."inrRateSnapshot")::text
+              ELSE NULL
+            END                   AS approx_usd,
+            CASE
+              WHEN d.method = 'MANUAL_INR'  THEN 'Manual Bank Transfer'
+              WHEN d.method = 'MANUAL_USDT' THEN 'Manual USDT Transfer'
+              WHEN d.gateway = 'razorpay'   THEN 'Razorpay'
+              WHEN d.gateway = 'cryptomus'  THEN 'Cryptomus USDT'
+              ELSE 'Payment attempt'
+            END                   AS description,
+            NULL::text            AS balance_after,
+            NULL::text            AS order_id,
+            d.gateway             AS gateway,
+            d.method              AS method,
+            d."createdAt"         AS created_at
+          FROM deposit_requests d
+          WHERE d."userId" = ${userId}
+            AND d.status IN ('PENDING','FAILED','CANCELLED','EXPIRED')
+            AND d.gateway IN (${isInr ? 'razorpay' : 'cryptomus'}, ${isInr ? 'manual_inr' : 'manual_usdt'})
+        ) combined
+        ORDER BY created_at DESC
+        LIMIT ${q.limit} OFFSET ${offset}
+      `;
+
+    } else {
+      // ALL: merge everything
+      const [txCount, depCount] = await Promise.all([
+        fastify.prisma.transaction.count({ where: { userId } }),
+        fastify.prisma.depositRequest.count({
+          where: {
+            userId,
+            status: { in: ["PENDING", "FAILED", "CANCELLED", "EXPIRED"] as never[] },
+          },
+        }),
+      ]);
+      total = txCount + depCount;
+
+      rows = await fastify.prisma.$queryRaw`
+        SELECT * FROM (
+          SELECT
+            t.id,
+            'transaction'::text   AS source,
+            t.type::text          AS type,
+            'COMPLETED'::text     AS status,
+            t."amountUsd"::text   AS amount_usd,
+            t."amountInr"::text   AS amount_inr,
+            NULL::text            AS approx_usd,
+            t.description         AS description,
+            t."balanceAfter"::text AS balance_after,
+            t."orderId"           AS order_id,
+            NULL::text            AS gateway,
+            NULL::text            AS method,
+            t."createdAt"         AS created_at
+          FROM transactions t
+          WHERE t."userId" = ${userId}
+          UNION ALL
+          SELECT
+            d.id,
+            'deposit'::text       AS source,
+            CASE
+              WHEN d.method = 'MANUAL_USDT' OR d.gateway = 'cryptomus'
+                THEN 'DEPOSIT_USDT'
+              ELSE 'DEPOSIT_INR'
+            END                   AS type,
+            d.status::text        AS status,
+            NULL::text            AS amount_usd,
+            d."amountInr"::text   AS amount_inr,
+            CASE
+              WHEN d."amountUsdt" IS NOT NULL
+                THEN d."amountUsdt"::text
+              WHEN d."amountInr" IS NOT NULL AND d."inrRateSnapshot" IS NOT NULL
+                THEN (d."amountInr" / d."inrRateSnapshot")::text
+              ELSE NULL
+            END                   AS approx_usd,
+            CASE
+              WHEN d.method = 'MANUAL_INR'  THEN 'Manual Bank Transfer'
+              WHEN d.method = 'MANUAL_USDT' THEN 'Manual USDT Transfer'
+              WHEN d.gateway = 'razorpay'   THEN 'Razorpay'
+              WHEN d.gateway = 'cryptomus'  THEN 'Cryptomus USDT'
+              ELSE 'Payment attempt'
+            END                   AS description,
+            NULL::text            AS balance_after,
+            NULL::text            AS order_id,
+            d.gateway             AS gateway,
+            d.method              AS method,
+            d."createdAt"         AS created_at
+          FROM deposit_requests d
+          WHERE d."userId" = ${userId}
+            AND d.status IN ('PENDING','FAILED','CANCELLED','EXPIRED')
+        ) combined
+        ORDER BY created_at DESC
+        LIMIT ${q.limit} OFFSET ${offset}
+      `;
+    }
+
+    // Normalise raw SQL rows into unified response shape
+    const transactions = (rows as any[]).map((r) => ({
+      id:          r.id,
+      source:      r.source,
+      type:        r.type,
+      gateway:     r.gateway ?? null,
+      method:      r.method ?? null,
+      status:      r.status,
+      amountUsd:   r.amount_usd ?? null,
+      approxUsd:   r.approx_usd ?? null,
+      amountInr:   r.amount_inr ?? null,
+      description: r.description,
+      balanceAfter: r.balance_after ?? null,
+      orderId:     r.order_id ?? null,
+      createdAt:   r.created_at instanceof Date
+        ? r.created_at.toISOString()
+        : String(r.created_at),
+    }));
 
     return reply.send({
-      transactions: page,
+      transactions,
       total,
       page:       q.page,
       limit:      q.limit,
@@ -70,9 +228,9 @@ export default async function transactionsRoute(fastify: FastifyInstance) {
   });
 }
 
-// ── Normalizers ──────────────────────────────────────────────────
+// ── Pure normalizers (used by ORDER_CHARGE / REFUND / ADMIN_ADJUSTMENT path) ──
 
-function normalizeTransaction(t: any) {
+function normalizeTx(t: any) {
   return {
     id:          t.id,
     source:      "transaction" as const,
@@ -81,46 +239,11 @@ function normalizeTransaction(t: any) {
     method:      null as string | null,
     status:      "COMPLETED",
     amountUsd:   t.amountUsd.toString(),
+    approxUsd:   null as string | null,
     amountInr:   t.amountInr?.toString() ?? null,
     description: t.description,
     balanceAfter: t.balanceAfter.toString(),
     orderId:     t.orderId ?? null,
     createdAt:   t.createdAt instanceof Date ? t.createdAt.toISOString() : t.createdAt,
-  };
-}
-
-function normalizeDeposit(d: any) {
-  // Build a human-readable description
-  let description = "Payment attempt";
-  if (d.method === "MANUAL_INR")  description = "Manual Bank Transfer";
-  else if (d.method === "MANUAL_USDT") description = "Manual USDT Transfer";
-  else if (d.gateway === "razorpay")   description = "Razorpay";
-  else if (d.gateway === "cryptomus")  description = "Cryptomus USDT";
-
-  // Compute approx USD from INR snapshot (for display only -- wallet NOT credited)
-  let amountUsd: string | null = null;
-  if (d.amountUsdt) {
-    amountUsd = new Decimal(d.amountUsdt.toString()).toFixed(8);
-  } else if (d.amountInr && d.inrRateSnapshot) {
-    amountUsd = new Decimal(d.amountInr.toString())
-      .dividedBy(new Decimal(d.inrRateSnapshot.toString()))
-      .toDecimalPlaces(8)
-      .toFixed(8);
-  }
-
-  return {
-    id:          d.id,
-    source:      "deposit" as const,
-    type:        d.method === "MANUAL_USDT" || d.gateway === "cryptomus" ? "DEPOSIT_USDT" : "DEPOSIT_INR",
-    gateway:     d.gateway as string | null,
-    method:      d.method as string | null,
-    status:      d.status as string,
-    amountUsd:   null as null,     // NOT a wallet credit -- do not show as +$X
-    approxUsd:   amountUsd,           // display only -- no wallet movement
-    amountInr:   d.amountInr?.toString() ?? null,
-    description,
-    balanceAfter: null as null,    // no balance change
-    orderId:     null as null,
-    createdAt:   d.createdAt instanceof Date ? d.createdAt.toISOString() : d.createdAt,
   };
 }
