@@ -24,6 +24,7 @@ const manualSchema = z.object({
 
 interface Invoice {
   invoiceId: string;
+  depositId: string;        // DB DepositRequest.id — used for test-event
   paymentAddress: string | null;
   paymentUrl: string | null;
   amountUsdt: string;
@@ -88,7 +89,7 @@ export default function DepositUsdtPage() {
     if (!invoice) return;
     setTestEventLoading(status);
     try {
-      await api.post("/deposits/cryptomus/test-event", { depositId: invoice.invoiceId, status });
+      await api.post("/deposits/cryptomus/test-event", { depositId: invoice.depositId, status });
       toast.info("Webhook requested. Check transaction history for status update.");
       qc.invalidateQueries({ queryKey: ["wallet"] });
       qc.invalidateQueries({ queryKey: ["transactions"] });

@@ -19,7 +19,7 @@ export default async function cryptomusDepositRoute(fastify: FastifyInstance) {
     if (mode === "mock") {
       // Mock: no Cryptomus call, local DepositRequest only
       const uuid = randomUUID();
-      await fastify.prisma.depositRequest.create({
+      const mockDeposit = await fastify.prisma.depositRequest.create({
         data: {
           userId,
           gateway: "cryptomus",
@@ -31,6 +31,7 @@ export default async function cryptomusDepositRoute(fastify: FastifyInstance) {
       });
       return reply.send({
         invoiceId: uuid,
+        depositId: mockDeposit.id,
         amountUsdt: amountUsdt.toFixed(2),
         currency: "USDT",
         network: "tron",
@@ -44,7 +45,7 @@ export default async function cryptomusDepositRoute(fastify: FastifyInstance) {
     if (mode === "test") {
       // Test: local DepositRequest, no real Cryptomus invoice call
       const uuid = randomUUID();
-      await fastify.prisma.depositRequest.create({
+      const testDeposit = await fastify.prisma.depositRequest.create({
         data: {
           userId,
           gateway: "cryptomus",
@@ -56,6 +57,7 @@ export default async function cryptomusDepositRoute(fastify: FastifyInstance) {
       });
       return reply.send({
         invoiceId: uuid,
+        depositId: testDeposit.id,
         amountUsdt: amountUsdt.toFixed(2),
         currency: "USDT",
         network: "tron",
@@ -68,7 +70,7 @@ export default async function cryptomusDepositRoute(fastify: FastifyInstance) {
 
     // live: call real Cryptomus API
     const apiBaseUrl = env.API_BASE_URL;
-    if (!apiBaseUrl || apiBaseUrl.includes("localhost") || apiBaseUrl.includes("127.0.0.1")) {
+    if (!apiBaseUrl || !apiBaseUrl.startsWith("https://") || apiBaseUrl.includes("localhost") || apiBaseUrl.includes("127.0.0.1")) {
       throw new ValidationError("API_BASE_URL must be a public HTTPS URL for Cryptomus live mode");
     }
 

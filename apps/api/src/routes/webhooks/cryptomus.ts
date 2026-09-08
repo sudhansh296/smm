@@ -148,7 +148,8 @@ export default async function cryptomusWebhookRoute(fastify: FastifyInstance) {
           where: { id: deposit.id },
           select: { status: true, amountUsdt: true, userId: true },
         }) as any;
-        if (!dep || dep.status === "COMPLETED") return;
+        // Only credit PENDING deposits -- FAILED/CANCELLED must NOT be credited
+        if (!dep || dep.status !== "PENDING") return;
 
         // Use server-stored amount — NOT webhook body amount
         const usdAmount = new Decimal(dep.amountUsdt.toString()).toDecimalPlaces(8);
