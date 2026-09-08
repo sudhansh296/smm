@@ -46,6 +46,7 @@ const envSchema = z.object({
   RAZORPAY_WEBHOOK_SECRET: z.string().default("mock"),
 
   // Cryptomus
+  CRYPTOMUS_MODE: z.enum(["mock", "test", "live"]).default("mock"),
   CRYPTOMUS_API_KEY: z.string().default("mock"),
   CRYPTOMUS_MERCHANT_ID: z.string().default("mock"),
 
@@ -78,6 +79,10 @@ function validateEnv(): Env {
 }
 
 export const env = validateEnv();
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Startup validations
+// ──────────────────────────────────────────────────────────────────────────────
 
 // Razorpay mode startup validation
 (function validateRazorpayMode() {
@@ -119,3 +124,35 @@ export const env = validateEnv();
   }
 })();
 
+
+// Cryptomus mode startup validation
+(function validateCryptomusMode() {
+  const { NODE_ENV, CRYPTOMUS_MODE, CRYPTOMUS_API_KEY, CRYPTOMUS_MERCHANT_ID } = env;
+
+  if (NODE_ENV === "production" && (CRYPTOMUS_MODE === "mock" || CRYPTOMUS_MODE === "test")) {
+    console.error("[FAIL] CRYPTOMUS_MODE=mock/test is not allowed in production. Use CRYPTOMUS_MODE=live.");
+    process.exit(1);
+  }
+
+  if (CRYPTOMUS_MODE === "test") {
+    if (!CRYPTOMUS_MERCHANT_ID || CRYPTOMUS_MERCHANT_ID === "mock") {
+      console.error("[FAIL] CRYPTOMUS_MODE=test requires a real CRYPTOMUS_MERCHANT_ID");
+      process.exit(1);
+    }
+    if (!CRYPTOMUS_API_KEY || CRYPTOMUS_API_KEY === "mock") {
+      console.error("[FAIL] CRYPTOMUS_MODE=test requires a real CRYPTOMUS_API_KEY");
+      process.exit(1);
+    }
+  }
+
+  if (CRYPTOMUS_MODE === "live") {
+    if (!CRYPTOMUS_MERCHANT_ID || CRYPTOMUS_MERCHANT_ID === "mock") {
+      console.error("[FAIL] CRYPTOMUS_MODE=live requires a real CRYPTOMUS_MERCHANT_ID");
+      process.exit(1);
+    }
+    if (!CRYPTOMUS_API_KEY || CRYPTOMUS_API_KEY === "mock") {
+      console.error("[FAIL] CRYPTOMUS_MODE=live requires a real CRYPTOMUS_API_KEY");
+      process.exit(1);
+    }
+  }
+})();

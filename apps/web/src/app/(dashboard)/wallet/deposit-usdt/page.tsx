@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -11,9 +11,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
-import { ArrowLeft, Copy, Clock, Zap, Shield, CheckCircle, Wallet } from "lucide-react";
+import { ArrowLeft, Copy, Clock, Zap, Shield, CheckCircle, Wallet, FlaskConical, TestTube } from "lucide-react";
 import Link from "next/link";
 
 const autoSchema = z.object({ amountUsdt: z.coerce.number().min(1, "Minimum $1").max(100000) });
@@ -23,7 +22,26 @@ const manualSchema = z.object({
   network: z.enum(["TRC20", "ERC20", "BEP20"]),
 });
 
-interface Invoice { invoiceId: string; paymentAddress: string; amountUsdt: string; currency: string; network: string; expiresAt: string; }
+interface Invoice {
+  invoiceId: string;
+  paymentAddress: string | null;
+  paymentUrl: string | null;
+  amountUsdt: string;
+  currency: string;
+  network: string;
+  expiresAt?: string;
+  isMock: boolean;
+  isTestMode: boolean;
+}
+
+const TEST_STATUSES = [
+  { status: "paid",         label: "Simulate Paid",           color: "bg-green-600 hover:bg-green-700" },
+  { status: "paid_over",   label: "Simulate Paid Over",      color: "bg-green-700 hover:bg-green-800" },
+  { status: "fail",         label: "Simulate Failed",         color: "bg-red-600 hover:bg-red-700" },
+  { status: "cancel",       label: "Simulate Cancelled",      color: "bg-slate-500 hover:bg-slate-600" },
+  { status: "wrong_amount", label: "Simulate Wrong Amount",   color: "bg-orange-600 hover:bg-orange-700" },
+  { status: "system_fail",  label: "Simulate System Failure", color: "bg-red-800 hover:bg-red-900" },
+] as const;
 
 export default function DepositUsdtPage() {
   const [tab, setTab] = useState<"auto" | "manual">("auto");
@@ -32,6 +50,8 @@ export default function DepositUsdtPage() {
   const [invoice, setInvoice] = useState<Invoice | null>(null);
   const [manualDone, setManualDone] = useState(false);
   const [network, setNetwork] = useState<"TRC20" | "ERC20" | "BEP20">("TRC20");
+  const [testEventLoading, setTestEventLoading] = useState<string | null>(null);
+  const qc = useQueryClient();
 
   const { data: addresses } = useQuery({
     queryKey: ["usdt-addresses"],
@@ -64,7 +84,21 @@ export default function DepositUsdtPage() {
     finally { setManualLoading(false); }
   };
 
-  const networkAddress = addresses ? (network === "TRC20" ? addresses.trc20 : network === "ERC20" ? addresses.erc20 : addresses.bep20) : "Loading...";
+  const onTestEvent = async (status: string) => {
+    if (!invoice) return;
+    setTestEventLoading(status);
+    try {
+      await api.post("/deposits/cryptomus/test-event", { depositId: invoice.invoiceId, status });
+      toast.info("Webhook requested. Check transaction history for status update.");
+      qc.invalidateQueries({ queryKey: ["wallet"] });
+      qc.invalidateQueries({ queryKey: ["transactions"] });
+    } catch (err) { toast.error(getErrorMessage(err)); }
+    finally { setTestEventLoading(null); }
+  };
+
+  const networkAddress = addresses
+    ? (network === "TRC20" ? addresses.trc20 : network === "ERC20" ? addresses.erc20 : addresses.bep20)
+    : "Loading...";
 
   return (
     <div className="max-w-lg space-y-5">
@@ -78,75 +112,223 @@ export default function DepositUsdtPage() {
 
       {/* Tab switcher */}
       <div className="flex rounded-lg border overflow-hidden">
-        <button onClick={() => setTab("auto")} className={`flex-1 py-2.5 text-sm font-medium transition-colors flex items-center justify-center gap-2 ${tab === "auto" ? "bg-primary text-primary-foreground" : "hover:bg-muted"}`}>
+        <button
+          onClick={() => setTab("auto")}
+          className={`flex-1 py-2.5 text-sm font-medium transition-colors flex items-center justify-center gap-2 ${tab === "auto" ? "bg-primary text-primary-foreground" : "hover:bg-muted"}`}
+        >
           <Zap className="h-4 w-4" /> Auto Payment
         </button>
-        <button onClick={() => setTab("manual")} className={`flex-1 py-2.5 text-sm font-medium transition-colors flex items-center justify-center gap-2 ${tab === "manual" ? "bg-primary text-primary-foreground" : "hover:bg-muted"}`}>
+        <button
+          onClick={() => setTab("manual")}
+          className={`flex-1 py-2.5 text-sm font-medium transition-colors flex items-center justify-center gap-2 ${tab === "manual" ? "bg-primary text-primary-foreground" : "hover:bg-muted"}`}
+        >
           <Wallet className="h-4 w-4" /> Manual Transfer
         </button>
       </div>
 
-      {/* Auto (Cryptomus) tab */}
+      {/* ── Auto (Cryptomus) tab ─────────────────────────────────────────────── */}
       {tab === "auto" && (
         <>
           {!invoice ? (
             <Card>
               <CardHeader className="pb-3">
                 <CardTitle className="text-base">Auto USDT Payment</CardTitle>
-                <CardDescription>Powered by Cryptomus  --  Auto credit after confirmation</CardDescription>
+                <CardDescription>Powered by Cryptomus — Auto credit after confirmation</CardDescription>
               </CardHeader>
               <CardContent>
                 <form onSubmit={autoForm.handleSubmit(onAuto)} className="space-y-4">
                   <div className="space-y-1.5">
                     <Label>Amount (USDT)</Label>
-                    <Input type="number" step="0.01" placeholder="e.g. 10" min={1} {...autoForm.register("amountUsdt")} />
-                    {autoForm.formState.errors.amountUsdt && <p className="text-xs text-destructive">{autoForm.formState.errors.amountUsdt.message as string}</p>}
+                    <Input
+                      type="number"
+                      step="0.01"
+                      placeholder="e.g. 10"
+                      min={1}
+                      {...autoForm.register("amountUsdt")}
+                    />
+                    {autoForm.formState.errors.amountUsdt && (
+                      <p className="text-xs text-destructive">{autoForm.formState.errors.amountUsdt.message as string}</p>
+                    )}
                   </div>
                   <div className="flex flex-wrap gap-3 text-xs text-muted-foreground">
                     <span className="flex items-center gap-1"><Zap className="h-3 w-3 text-green-500" />Auto credit</span>
                     <span className="flex items-center gap-1"><Shield className="h-3 w-3 text-green-500" />TRC20 network</span>
                     <span className="flex items-center gap-1"><Clock className="h-3 w-3 text-yellow-500" />1 hour validity</span>
                   </div>
-                  <Button type="submit" className="w-full" disabled={autoLoading}>{autoLoading ? "Generating..." : "Generate Payment Address"}</Button>
+                  <Button type="submit" className="w-full" disabled={autoLoading}>
+                    {autoLoading ? "Generating..." : "Generate Payment Address"}
+                  </Button>
                 </form>
               </CardContent>
             </Card>
           ) : (
-            <Card>
-              <CardHeader className="pb-3">
-                <CardTitle className="flex items-center gap-2 text-base flex-wrap">
-                  Payment Address
-                  <Badge variant="outline" className="text-xs text-yellow-600 border-yellow-300">
-                    <Clock className="h-3 w-3 mr-1" />Expires {new Date(invoice.expiresAt).toLocaleTimeString()}
-                  </Badge>
-                </CardTitle>
-                <CardDescription>
-                  Send exactly <strong>{invoice.amountUsdt} {invoice.currency}</strong> on <strong>{invoice.network}</strong>
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="rounded-lg bg-muted p-3">
-                  <p className="text-xs text-muted-foreground mb-1">Payment Address ({invoice.network})</p>
-                  <div className="flex items-start gap-2">
-                    <code className="text-xs font-mono break-all flex-1 leading-relaxed">{invoice.paymentAddress}</code>
-                    <Button size="icon" variant="ghost" onClick={() => copy(invoice.paymentAddress)} className="shrink-0 h-8 w-8">
-                      <Copy className="h-3.5 w-3.5" />
+            <>
+              {/* ── MOCK mode invoice ─────────────────────────────────────── */}
+              {invoice.isMock && (
+                <Card className="border-dashed border-slate-400">
+                  <CardHeader className="pb-3">
+                    <CardTitle className="flex items-center gap-2 text-base flex-wrap">
+                      Mock Invoice
+                      <Badge variant="outline" className="text-xs text-slate-500 border-slate-400">
+                        <FlaskConical className="h-3 w-3 mr-1" />LOCAL MOCK MODE
+                      </Badge>
+                    </CardTitle>
+                    <CardDescription>
+                      No real Cryptomus request was made. Set <code className="text-xs">CRYPTOMUS_MODE=live</code> for
+                      production.
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-3">
+                    <div className="rounded-lg bg-muted p-3 space-y-1 text-sm">
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Invoice ID</span>
+                        <code className="text-xs font-mono">{invoice.invoiceId}</code>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Amount</span>
+                        <span>{invoice.amountUsdt} {invoice.currency}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Network</span>
+                        <span className="uppercase">{invoice.network}</span>
+                      </div>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      In mock mode the deposit is created in the DB but no wallet credit occurs automatically. Use
+                      an admin action or switch to <code>CRYPTOMUS_MODE=test</code> with a tunnel URL to simulate
+                      webhooks.
+                    </p>
+                    <Button variant="outline" className="w-full" onClick={() => setInvoice(null)}>
+                      Create Another (Mock)
                     </Button>
-                  </div>
-                </div>
-                <div className="space-y-1 text-xs">
-                  <p className="text-orange-600 font-medium">[WARN] Send ONLY {invoice.currency} on {invoice.network}</p>
-                  <p className="text-muted-foreground">[WARN] Sending other coins = permanent loss</p>
-                  <p className="text-green-600">✓ Auto-credited after 1 network confirmation</p>
-                </div>
-                <Button variant="outline" className="w-full" onClick={() => setInvoice(null)}>Create New Invoice</Button>
-              </CardContent>
-            </Card>
+                  </CardContent>
+                </Card>
+              )}
+
+              {/* ── TEST mode invoice ─────────────────────────────────────── */}
+              {invoice.isTestMode && (
+                <Card className="border-dashed border-yellow-400">
+                  <CardHeader className="pb-3">
+                    <CardTitle className="flex items-center gap-2 text-base flex-wrap">
+                      Test Invoice
+                      <Badge variant="outline" className="text-xs text-yellow-600 border-yellow-400">
+                        <TestTube className="h-3 w-3 mr-1" />CRYPTOMUS TEST MODE
+                      </Badge>
+                    </CardTitle>
+                    <CardDescription>
+                      No payment address — use simulation buttons to trigger webhook events.
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <div className="rounded-lg bg-muted p-3 space-y-1 text-sm">
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Deposit ID</span>
+                        <code className="text-xs font-mono break-all">{invoice.invoiceId}</code>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Amount</span>
+                        <span>{invoice.amountUsdt} {invoice.currency}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Network</span>
+                        <span className="uppercase">{invoice.network}</span>
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <p className="text-xs font-medium text-muted-foreground">
+                        Simulate a Cryptomus webhook event (requires public HTTPS API_BASE_URL):
+                      </p>
+                      <div className="grid grid-cols-2 gap-2">
+                        {TEST_STATUSES.map(({ status, label, color }) => (
+                          <button
+                            key={status}
+                            type="button"
+                            disabled={testEventLoading !== null}
+                            onClick={() => onTestEvent(status)}
+                            className={`${color} text-white text-xs font-medium py-2 px-3 rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed`}
+                          >
+                            {testEventLoading === status ? "Requesting..." : label}
+                          </button>
+                        ))}
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        Buttons call the official Cryptomus test-webhook API, which delivers a real signed
+                        webhook to your callback URL. Check transactions after a few seconds.
+                      </p>
+                    </div>
+
+                    <Button variant="outline" className="w-full" onClick={() => setInvoice(null)}>
+                      Create New Test Invoice
+                    </Button>
+                  </CardContent>
+                </Card>
+              )}
+
+              {/* ── LIVE mode invoice ─────────────────────────────────────── */}
+              {!invoice.isMock && !invoice.isTestMode && (
+                <Card>
+                  <CardHeader className="pb-3">
+                    <CardTitle className="flex items-center gap-2 text-base flex-wrap">
+                      Payment Address
+                      {invoice.expiresAt && (
+                        <Badge variant="outline" className="text-xs text-yellow-600 border-yellow-300">
+                          <Clock className="h-3 w-3 mr-1" />Expires {new Date(invoice.expiresAt).toLocaleTimeString()}
+                        </Badge>
+                      )}
+                    </CardTitle>
+                    <CardDescription>
+                      Send exactly <strong>{invoice.amountUsdt} {invoice.currency}</strong> on{" "}
+                      <strong className="uppercase">{invoice.network}</strong>
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    {invoice.paymentAddress && (
+                      <div className="rounded-lg bg-muted p-3">
+                        <p className="text-xs text-muted-foreground mb-1">
+                          Payment Address (<span className="uppercase">{invoice.network}</span>)
+                        </p>
+                        <div className="flex items-start gap-2">
+                          <code className="text-xs font-mono break-all flex-1 leading-relaxed">
+                            {invoice.paymentAddress}
+                          </code>
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            onClick={() => copy(invoice.paymentAddress!)}
+                            className="shrink-0 h-8 w-8"
+                          >
+                            <Copy className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
+                      </div>
+                    )}
+                    {invoice.paymentUrl && !invoice.paymentAddress && (
+                      <Button asChild className="w-full">
+                        <a href={invoice.paymentUrl} target="_blank" rel="noopener noreferrer">
+                          Open Payment Page
+                        </a>
+                      </Button>
+                    )}
+                    <div className="space-y-1 text-xs">
+                      <p className="text-orange-600 font-medium">
+                        ⚠ Send ONLY {invoice.currency} on <span className="uppercase">{invoice.network}</span>
+                      </p>
+                      <p className="text-muted-foreground">⚠ Sending other coins = permanent loss</p>
+                      <p className="text-green-600">✓ Auto-credited after 1 network confirmation</p>
+                    </div>
+                    <Button variant="outline" className="w-full" onClick={() => setInvoice(null)}>
+                      Create New Invoice
+                    </Button>
+                  </CardContent>
+                </Card>
+              )}
+            </>
           )}
         </>
       )}
 
-      {/* Manual USDT tab */}
+      {/* ── Manual USDT tab ──────────────────────────────────────────────────── */}
       {tab === "manual" && (
         <Card>
           <CardHeader className="pb-3">
@@ -158,8 +340,12 @@ export default function DepositUsdtPage() {
               <div className="text-center py-6 space-y-3">
                 <CheckCircle className="h-12 w-12 text-green-500 mx-auto" />
                 <p className="font-semibold">Request Submitted!</p>
-                <p className="text-sm text-muted-foreground">Admin will verify on blockchain and credit your wallet.</p>
-                <Button variant="outline" onClick={() => { setManualDone(false); manualForm.reset(); }}>Submit Another</Button>
+                <p className="text-sm text-muted-foreground">
+                  Admin will verify on blockchain and credit your wallet.
+                </p>
+                <Button variant="outline" onClick={() => { setManualDone(false); manualForm.reset(); }}>
+                  Submit Another
+                </Button>
               </div>
             ) : (
               <>
@@ -168,9 +354,12 @@ export default function DepositUsdtPage() {
                   <Label>Select Network</Label>
                   <div className="flex gap-2">
                     {(["TRC20", "ERC20", "BEP20"] as const).map((n) => (
-                      <button key={n} type="button"
+                      <button
+                        key={n}
+                        type="button"
                         onClick={() => { setNetwork(n); manualForm.setValue("network", n); }}
-                        className={`flex-1 py-2 text-xs font-semibold rounded-md border transition-colors ${network === n ? "bg-primary text-primary-foreground border-primary" : "hover:bg-muted"}`}>
+                        className={`flex-1 py-2 text-xs font-semibold rounded-md border transition-colors ${network === n ? "bg-primary text-primary-foreground border-primary" : "hover:bg-muted"}`}
+                      >
                         {n}
                       </button>
                     ))}
@@ -181,7 +370,12 @@ export default function DepositUsdtPage() {
                   <p className="text-xs text-muted-foreground mb-1">Our {network} USDT Address</p>
                   <div className="flex items-center gap-2">
                     <code className="text-xs font-mono break-all flex-1">{networkAddress}</code>
-                    <Button size="icon" variant="ghost" onClick={() => copy(networkAddress)} className="shrink-0 h-8 w-8">
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      onClick={() => copy(networkAddress)}
+                      className="shrink-0 h-8 w-8"
+                    >
                       <Copy className="h-3.5 w-3.5" />
                     </Button>
                   </div>
@@ -191,15 +385,23 @@ export default function DepositUsdtPage() {
                   <div className="space-y-1.5">
                     <Label>Amount Sent (USDT)</Label>
                     <Input type="number" step="0.01" placeholder="e.g. 10" {...manualForm.register("amountUsdt")} />
-                    {manualForm.formState.errors.amountUsdt && <p className="text-xs text-destructive">{manualForm.formState.errors.amountUsdt.message as string}</p>}
+                    {manualForm.formState.errors.amountUsdt && (
+                      <p className="text-xs text-destructive">{manualForm.formState.errors.amountUsdt.message as string}</p>
+                    )}
                   </div>
                   <div className="space-y-1.5">
                     <Label>Transaction Hash (TxID)</Label>
                     <Input placeholder="0x... or TxHash" {...manualForm.register("txHash")} />
-                    {manualForm.formState.errors.txHash && <p className="text-xs text-destructive">{manualForm.formState.errors.txHash.message as string}</p>}
+                    {manualForm.formState.errors.txHash && (
+                      <p className="text-xs text-destructive">{manualForm.formState.errors.txHash.message as string}</p>
+                    )}
                   </div>
-                  <p className="text-xs text-muted-foreground">[WARN] Make sure you send on {network} network only</p>
-                  <Button type="submit" className="w-full" disabled={manualLoading}>{manualLoading ? "Submitting..." : "Submit Deposit Request"}</Button>
+                  <p className="text-xs text-muted-foreground">
+                    ⚠ Make sure you send on {network} network only
+                  </p>
+                  <Button type="submit" className="w-full" disabled={manualLoading}>
+                    {manualLoading ? "Submitting..." : "Submit Deposit Request"}
+                  </Button>
                 </form>
               </>
             )}
