@@ -286,7 +286,7 @@ export default async function razorpayDepositRoute(fastify: FastifyInstance) {
 
     await fastify.prisma.depositRequest.update({
       where: { id: deposit.id },
-      data:  { status: "CANCELLED" as never },
+      data:  { status: "CANCELLED" as any },
     });
 
     return reply.send({ message: "Deposit cancelled" });

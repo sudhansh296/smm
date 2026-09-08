@@ -58,7 +58,7 @@ export default async function razorpayWebhookRoute(fastify: FastifyInstance) {
         if (deposit && deposit.gateway === "razorpay" && deposit.status === "PENDING") {
           await fastify.prisma.depositRequest.update({
             where: { id: deposit.id },
-            data:  { status: "FAILED" as never },
+            data:  { status: "FAILED" },
           });
           fastify.log.info({ orderId: failedEntity.order_id }, "Razorpay webhook: deposit marked FAILED");
         }

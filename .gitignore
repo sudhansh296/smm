@@ -46,3 +46,5 @@ coverage
 .nyc_output
 api-out*.txt
 api-err*.txt
+# TypeScript build cache
+*.tsbuildinfo
