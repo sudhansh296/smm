@@ -1,29 +1,26 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { Sidebar } from "@/components/dashboard/Sidebar";
 import { useAuthStore } from "@/store/auth.store";
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
-  const { user, hasHydrated } = useAuthStore();
-  const router = useRouter();
+  const user        = useAuthStore((s) => s.user);
+  const hasHydrated = useAuthStore((s) => s.hasHydrated);
+  const router      = useRouter();
+  // Track whether we have ever had a user -- so navigation between pages
+  // never shows the hydration spinner again after first successful mount
+  const hadUserRef  = useRef(false);
+  if (user) hadUserRef.current = true;
 
   useEffect(() => {
-    // Wait for Zustand persist hydration to complete before acting.
-    // During hydration hasHydrated === false and user === null temporarily --
-    // we must NOT redirect here or the current route will be lost on refresh.
     if (!hasHydrated) return;
-
-    // Hydration complete and no user -> send to landing page (login interface is on "/")
-    if (!user) {
-      router.replace("/");
-    }
-    // user exists -> stay on current route, no redirect to /dashboard
+    if (!user) router.replace("/");
   }, [hasHydrated, user, router]);
 
-  // While hydrating show a minimal loading state to prevent flash
-  if (!hasHydrated) {
+  // Only show hydration spinner on true first load (never seen a user yet)
+  if (!hasHydrated && !hadUserRef.current) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
         <div className="animate-spin h-8 w-8 border-4 border-primary border-t-transparent rounded-full" />
@@ -31,7 +28,6 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     );
   }
 
-  // Hydrated but no user -- redirect is in progress, render nothing
   if (!user) return null;
 
   return (

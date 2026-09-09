@@ -121,7 +121,8 @@ export function Sidebar() {
     enabled: !!user,
     refetchInterval: 15_000,
     refetchOnWindowFocus: true,
-    staleTime: 0,
+    staleTime: 10_000,       // show cached balance instantly, refresh in background
+    placeholderData: (prev: any) => prev,
   });
 
   const balanceUsd = walletData ? Number(walletData.balanceUsd).toFixed(2) : "0.00";

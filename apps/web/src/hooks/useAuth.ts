@@ -8,8 +8,12 @@ import type { UserProfile, LoginInput, RegisterInput } from "@nexussmm/types";
 import { toast } from "sonner";
 
 export function useAuth() {
-  const { user, setAuth, clearAuth } = useAuthStore();
-  const router = useRouter();
+  // Narrow selectors -- each subscriber only rerenders when its own slice changes
+  const user      = useAuthStore((s) => s.user);
+  const setAuth   = useAuthStore((s) => s.setAuth);
+  const clearAuth = useAuthStore((s) => s.clearAuth);
+
+  const router      = useRouter();
   const queryClient = useQueryClient();
 
   const loginMutation = useMutation({
@@ -29,7 +33,6 @@ export function useAuth() {
       router.push("/dashboard");
     },
     onError: (err: any) => {
-      // EMAIL_NOT_VERIFIED is handled by login page — don't show generic toast
       const code = err?.response?.data?.code;
       if (code === "EMAIL_NOT_VERIFIED") return;
       toast.error(getErrorMessage(err));
@@ -54,7 +57,7 @@ export function useAuth() {
     onSuccess: () => {
       clearAuth();
       queryClient.clear();
-      window.location.replace("/login");
+      window.location.replace("/"); // "/" is landing page with login interface
     },
   });
 
@@ -62,11 +65,11 @@ export function useAuth() {
     user,
     isAuthenticated: !!user,
     isAdmin: user?.isAdmin ?? false,
-    login: loginMutation.mutate,
+    login:      loginMutation.mutate,
     loginAsync: loginMutation.mutateAsync,
-    register: registerMutation.mutate,
-    logout: logoutMutation.mutate,
-    isLoggingIn: loginMutation.isPending,
+    register:   registerMutation.mutate,
+    logout:     logoutMutation.mutate,
+    isLoggingIn:   loginMutation.isPending,
     isRegistering: registerMutation.isPending,
   };
 }

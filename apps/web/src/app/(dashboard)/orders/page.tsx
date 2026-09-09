@@ -39,14 +39,14 @@ export default function OrdersPage() {
   const [page, setPage] = useState(1);
   const qc = useQueryClient();
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isFetching } = useQuery({
     queryKey: ["orders", { status, page }],
     queryFn: () => api.get("/user/orders", {
       params: { status: status === "ALL" ? undefined : status, page, limit: 20 },
     }).then((r) => r.data),
     placeholderData: (prev) => prev,
     refetchInterval: 30_000,
-    staleTime: 0,
+    staleTime: 10_000,
   });
 
   const cancelMutation = useMutation({
@@ -76,7 +76,7 @@ export default function OrdersPage() {
         </Select>
       </div>
 
-      {isLoading ? (
+      {isLoading && !data ? (
         <div className="flex justify-center py-16">
           <div className="animate-spin h-8 w-8 border-4 border-primary border-t-transparent rounded-full" />
         </div>

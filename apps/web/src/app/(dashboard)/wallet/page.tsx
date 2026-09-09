@@ -65,7 +65,8 @@ export default function WalletPage() {
     queryFn: () => api.get("/user/wallet").then((r) => r.data),
     refetchInterval: 15_000,
     refetchOnWindowFocus: true,
-    staleTime: 0,
+    staleTime: 10_000,
+    placeholderData: (prev: any) => prev,
   });
 
   const { data: txData, isLoading } = useQuery({
@@ -74,7 +75,7 @@ export default function WalletPage() {
       params: { type: txType === "ALL" ? undefined : txType, page, limit: 20 },
     }).then((r) => r.data),
     placeholderData: (prev) => prev,
-    staleTime: 0,
+    staleTime: 10_000,
     refetchOnWindowFocus: true,
   });
 
@@ -129,7 +130,7 @@ export default function WalletPage() {
           </Select>
         </CardHeader>
         <CardContent className="p-0">
-          {isLoading ? (
+          {isLoading && !txData ? (
             <div className="flex justify-center py-8">
               <div className="animate-spin h-6 w-6 border-4 border-primary border-t-transparent rounded-full" />
             </div>

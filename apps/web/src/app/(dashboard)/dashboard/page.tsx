@@ -16,14 +16,17 @@ export default function DashboardPage() {
   const { data: walletData } = useQuery({
     queryKey: ["wallet"],
     queryFn: () => api.get("/user/wallet").then((r) => r.data),
-    staleTime: 0,
+    staleTime: 10_000,
     refetchOnWindowFocus: true,
     refetchInterval: 15_000,
+    placeholderData: (prev: any) => prev,
   });
 
   const { data: ordersData } = useQuery({
     queryKey: ["orders", { page: 1, limit: 5 }],
     queryFn: () => api.get("/user/orders?page=1&limit=5").then((r) => r.data),
+    staleTime: 10_000,
+    placeholderData: (prev: any) => prev,
   });
 
   const stats = [
