@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { Sidebar } from "@/components/dashboard/Sidebar";
 import { useAuthStore } from "@/store/auth.store";
@@ -9,27 +9,18 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const user        = useAuthStore((s) => s.user);
   const hasHydrated = useAuthStore((s) => s.hasHydrated);
   const router      = useRouter();
-  // Track whether we have ever had a user -- so navigation between pages
-  // never shows the hydration spinner again after first successful mount
-  const hadUserRef  = useRef(false);
-  if (user) hadUserRef.current = true;
 
   useEffect(() => {
+    // Only redirect AFTER Zustand persist has finished loading.
+    // Before hydration, user===null is a temporary state, NOT a logout signal.
     if (!hasHydrated) return;
     if (!user) router.replace("/");
   }, [hasHydrated, user, router]);
 
-  // Only show hydration spinner on true first load (never seen a user yet)
-  if (!hasHydrated && !hadUserRef.current) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-background">
-        <div className="animate-spin h-8 w-8 border-4 border-primary border-t-transparent rounded-full" />
-      </div>
-    );
-  }
-
-  if (!user) return null;
-
+  // ALWAYS render the full shell -- never return null or a full-page spinner.
+  // Middleware already validated the auth cookie server-side before this renders.
+  // Sidebar safely handles user===null (balance hidden, name hidden).
+  // Children render immediately -- no auth gate here.
   return (
     <div className="min-h-screen-safe bg-background">
       <Sidebar />
