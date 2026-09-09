@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, Suspense } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
@@ -24,7 +24,7 @@ const schema = z.object({
 
 type FormData = z.infer<typeof schema>;
 
-export default function NewOrderPage() {
+function NewOrderContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const preselectedId = searchParams.get("serviceId") ?? "";
@@ -221,5 +221,13 @@ export default function NewOrderPage() {
         </CardContent>
       </Card>
     </div>
+  );
+}
+
+export default function NewOrderPage() {
+  return (
+    <Suspense fallback={<div className="flex justify-center py-16"><div className="animate-spin h-8 w-8 border-4 border-primary border-t-transparent rounded-full" /></div>}>
+      <NewOrderContent />
+    </Suspense>
   );
 }
