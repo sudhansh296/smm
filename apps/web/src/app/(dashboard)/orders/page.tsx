@@ -39,7 +39,7 @@ export default function OrdersPage() {
   const [page, setPage] = useState(1);
   const qc = useQueryClient();
 
-  const { data, isLoading, isFetching } = useQuery({
+  const { data, isLoading } = useQuery({
     queryKey: ["orders", { status, page }],
     queryFn: () => api.get("/user/orders", {
       params: { status: status === "ALL" ? undefined : status, page, limit: 20 },

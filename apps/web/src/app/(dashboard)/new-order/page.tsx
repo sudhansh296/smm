@@ -35,11 +35,15 @@ export default function NewOrderPage() {
   const { data: servicesData } = useQuery({
     queryKey: ["services-all"],
     queryFn: () => api.get("/services?limit=300&page=1").then((r) => r.data),
+    staleTime: 60_000,
+    placeholderData: (prev: any) => prev,
   });
 
   const { data: wallet } = useQuery({
     queryKey: ["wallet"],
     queryFn: () => api.get("/user/wallet").then((r) => r.data),
+    staleTime: 10_000,
+    placeholderData: (prev: any) => prev,
   });
 
   const selectedService = servicesData?.services?.find(

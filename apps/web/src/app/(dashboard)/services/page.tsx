@@ -30,6 +30,7 @@ export default function ServicesPage() {
         },
       }).then((r) => r.data),
     placeholderData: (prev) => prev,
+    staleTime: 60_000, // services are semi-static, cache aggressively
   });
 
   return (
@@ -69,7 +70,7 @@ export default function ServicesPage() {
         </p>
       )}
 
-      {isLoading ? (
+      {isLoading && !data ? (
         <div className="flex justify-center py-16">
           <div className="animate-spin h-8 w-8 border-4 border-primary border-t-transparent rounded-full" />
         </div>

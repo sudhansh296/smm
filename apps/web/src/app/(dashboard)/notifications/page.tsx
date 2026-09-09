@@ -13,6 +13,8 @@ export default function NotificationsPage() {
   const { data, isLoading } = useQuery({
     queryKey: ["notifications"],
     queryFn: () => api.get("/user/notifications").then((r) => r.data),
+    staleTime: 30_000,
+    placeholderData: (prev: any) => prev,
   });
 
   const markReadMutation = useMutation({
@@ -34,7 +36,7 @@ export default function NotificationsPage() {
           </CardTitle>
         </CardHeader>
         <CardContent className="p-0">
-          {isLoading ? (
+          {isLoading && !data ? (
             <div className="flex justify-center py-8">
               <div className="animate-spin h-6 w-6 border-4 border-primary border-t-transparent rounded-full" />
             </div>
