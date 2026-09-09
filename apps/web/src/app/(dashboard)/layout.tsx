@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { Sidebar } from "@/components/dashboard/Sidebar";
 import { useAuthStore } from "@/store/auth.store";
@@ -9,17 +9,25 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const user        = useAuthStore((s) => s.user);
   const hasHydrated = useAuthStore((s) => s.hasHydrated);
   const router      = useRouter();
+  // Track whether we have ever had a user -- so navigation between pages
+  // never shows the hydration spinner again after first successful mount
+  const hadUserRef  = useRef(false);
+  if (user) hadUserRef.current = true;
 
   useEffect(() => {
     if (!hasHydrated) return;
     if (!user) router.replace("/");
   }, [hasHydrated, user, router]);
 
-  // Before hydration: middleware already validated auth via cookies.
-  // Render the full shell immediately — no spinner, no blank flash.
-  // The brief period before user profile loads from Zustand persist is fine
-  // because Sidebar gracefully handles user===null (wallet query disabled).
-  if (!user && !hasHydrated) return null;
+  // Only show hydration spinner on true first load (never seen a user yet)
+  if (!hasHydrated && !hadUserRef.current) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background">
+        <div className="animate-spin h-8 w-8 border-4 border-primary border-t-transparent rounded-full" />
+      </div>
+    );
+  }
+
   if (!user) return null;
 
   return (
