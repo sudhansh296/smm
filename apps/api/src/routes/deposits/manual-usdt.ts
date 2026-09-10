@@ -25,30 +25,32 @@ export default async function manualUsdtDepositRoute(fastify: FastifyInstance) {
     const network    = parsed.network;
     const txHash     = parsed.txHash.trim().toLowerCase();
 
-    // Atomic duplicate check + create to prevent race condition on same txHash
+    // Friendly pre-check (not a concurrency guarantee alone)
+    const existingTx = await fastify.prisma.depositRequest.findFirst({
+      where: { txId: txHash, method: "MANUAL_USDT" } as any,
+    });
+    if (existingTx) throw new ValidationError("This transaction hash has already been submitted");
+
+    // DB unique constraint on (method, txId) is the final concurrency guarantee.
+    // Handle P2002 in case two concurrent requests both pass the pre-check.
     let deposit: any;
     try {
-      deposit = await fastify.prisma.$transaction(async (tx) => {
-        const existing = await tx.depositRequest.findFirst({
-          where: { txId: txHash, method: "MANUAL_USDT" } as any,
-        });
-        if (existing) throw new ValidationError("This transaction hash has already been submitted");
-
-        return tx.depositRequest.create({
-          data: {
-            userId: request.user.sub,
-            gateway: "manual_usdt",
-            method: "MANUAL_USDT",
-            amountInr: null,
-            amountUsdt,
-            gatewayOrderId: `manual_usdt_${request.user.sub}_${Date.now()}`,
-            txId: txHash,
-            adminNote: `Network: ${network}`,
-          } as any,
-        });
+      deposit = await fastify.prisma.depositRequest.create({
+        data: {
+          userId: request.user.sub,
+          gateway: "manual_usdt",
+          method: "MANUAL_USDT",
+          amountInr: null,
+          amountUsdt,
+          gatewayOrderId: `manual_usdt_${request.user.sub}_${Date.now()}`,
+          txId: txHash,
+          adminNote: `Network: ${network}`,
+        } as any,
       });
-    } catch (err) {
-      if (err instanceof ValidationError) throw err;
+    } catch (err: any) {
+      if (err?.code === "P2002") {
+        throw new ValidationError("This transaction hash has already been submitted");
+      }
       throw err;
     }
 

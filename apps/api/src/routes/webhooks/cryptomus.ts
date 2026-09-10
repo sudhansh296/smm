@@ -70,37 +70,33 @@ export default async function cryptomusWebhookRoute(fastify: FastifyInstance) {
       return reply.status(200).send({ ok: true });
     }
 
-    // Failure statuses
+    // Failure statuses -- atomic: only PENDING -> FAILED, never overwrites COMPLETED
     if (["fail", "failed", "system_fail", "wrong_amount"].includes(cryptomusStatus)) {
-      if (deposit.status === "PENDING") {
-        await fastify.prisma.depositRequest.update({
-          where: { id: deposit.id },
-          data: { status: "FAILED" },
-        });
+      const updated = await fastify.prisma.depositRequest.updateMany({
+        where: { id: deposit.id, gateway: "cryptomus", status: "PENDING" },
+        data:  { status: "FAILED" },
+      });
+      if (updated.count > 0) {
         fastify.log.info({ cryptomusUuid, reason: cryptomusStatus }, "Cryptomus webhook: deposit FAILED");
       }
       return reply.status(200).send({ ok: true });
     }
 
-    // Cancel statuses
+    // Cancel statuses -- atomic: only PENDING -> CANCELLED
     if (["cancel", "cancelled"].includes(cryptomusStatus)) {
-      if (deposit.status === "PENDING") {
-        await fastify.prisma.depositRequest.update({
-          where: { id: deposit.id },
-          data: { status: "CANCELLED" },
-        });
-      }
+      await fastify.prisma.depositRequest.updateMany({
+        where: { id: deposit.id, gateway: "cryptomus", status: "PENDING" },
+        data:  { status: "CANCELLED" },
+      });
       return reply.status(200).send({ ok: true });
     }
 
-    // Expired
+    // Expired -- atomic: only PENDING -> EXPIRED
     if (cryptomusStatus === "expired") {
-      if (deposit.status === "PENDING") {
-        await fastify.prisma.depositRequest.update({
-          where: { id: deposit.id },
-          data: { status: "EXPIRED" },
-        });
-      }
+      await fastify.prisma.depositRequest.updateMany({
+        where: { id: deposit.id, gateway: "cryptomus", status: "PENDING" },
+        data:  { status: "EXPIRED" },
+      });
       return reply.status(200).send({ ok: true });
     }
 

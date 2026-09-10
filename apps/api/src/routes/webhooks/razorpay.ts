@@ -51,15 +51,17 @@ export default async function razorpayWebhookRoute(fastify: FastifyInstance) {
     if (event.event === "payment.failed") {
       const failedEntity = event.payload?.payment?.entity;
       if (failedEntity?.order_id) {
-        const deposit = await fastify.prisma.depositRequest.findFirst({
-          where: { gatewayOrderId: failedEntity.order_id },
-          select: { id: true, status: true, gateway: true },
-        }) as any;
-        if (deposit && deposit.gateway === "razorpay" && deposit.status === "PENDING") {
-          await fastify.prisma.depositRequest.update({
-            where: { id: deposit.id },
-            data:  { status: "FAILED" },
-          });
+        // Atomic conditional update: only transitions PENDING -> FAILED.
+        // If a concurrent payment.captured already set COMPLETED, count===0 and we do nothing.
+        const updated = await fastify.prisma.depositRequest.updateMany({
+          where: {
+            gatewayOrderId: failedEntity.order_id,
+            gateway: "razorpay",
+            status: "PENDING",
+          },
+          data: { status: "FAILED" },
+        });
+        if (updated.count > 0) {
           fastify.log.info({ orderId: failedEntity.order_id }, "Razorpay webhook: deposit marked FAILED");
         }
       }

@@ -31,31 +31,33 @@ export default async function manualInrDepositRoute(fastify: FastifyInstance) {
     const effectiveRate = await getEffectiveInrRate(fastify.redis, fastify.prisma);
     const amountUsd = new Decimal(amountInr).dividedBy(effectiveRate).toDecimalPlaces(8);
 
-    // Atomic duplicate check + create inside transaction to prevent race condition
+    // Friendly pre-check (not a concurrency guarantee alone)
+    const existingUtr = await fastify.prisma.depositRequest.findFirst({
+      where: { txId: utrNumber, method: "MANUAL_INR" } as any,
+    });
+    if (existingUtr) throw new ValidationError("This UTR/Transaction ID has already been submitted");
+
+    // DB unique constraint on (method, txId) is the final concurrency guarantee.
+    // Handle P2002 in case two concurrent requests both pass the pre-check.
     let deposit: any;
     try {
-      deposit = await fastify.prisma.$transaction(async (tx) => {
-        const existing = await tx.depositRequest.findFirst({
-          where: { txId: utrNumber, method: "MANUAL_INR" } as any,
-        });
-        if (existing) throw new ValidationError("This UTR/Transaction ID has already been submitted");
-
-        return tx.depositRequest.create({
-          data: {
-            userId: request.user.sub,
-            gateway: "manual_inr",
-            method: "MANUAL_INR",
-            amountInr,
-            amountUsdt: null,
-            gatewayOrderId: `manual_inr_${request.user.sub}_${Date.now()}`,
-            inrRateSnapshot: new Decimal(effectiveRate).toDecimalPlaces(4).toNumber(),
-            txId: utrNumber,
-            adminNote: note ?? null,
-          } as any,
-        });
+      deposit = await fastify.prisma.depositRequest.create({
+        data: {
+          userId: request.user.sub,
+          gateway: "manual_inr",
+          method: "MANUAL_INR",
+          amountInr,
+          amountUsdt: null,
+          gatewayOrderId: `manual_inr_${request.user.sub}_${Date.now()}`,
+          inrRateSnapshot: new Decimal(effectiveRate).toDecimalPlaces(4).toNumber(),
+          txId: utrNumber,
+          adminNote: note ?? null,
+        } as any,
       });
-    } catch (err) {
-      if (err instanceof ValidationError) throw err;
+    } catch (err: any) {
+      if (err?.code === "P2002") {
+        throw new ValidationError("This UTR/Transaction ID has already been submitted");
+      }
       throw err;
     }
 

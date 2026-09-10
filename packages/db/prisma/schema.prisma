@@ -320,6 +320,9 @@ model DepositRequest {
   @@index([gatewayOrderId])
   @@index([status])
   @@index([method])
+  // Prevents duplicate UTR/TxHash under concurrent submissions.
+  // txId is nullable so automatic deposits (Razorpay/Cryptomus) are unaffected.
+  @@unique([method, txId])
   @@map("deposit_requests")
 }
 
