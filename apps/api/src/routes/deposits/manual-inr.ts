@@ -28,27 +28,36 @@ export default async function manualInrDepositRoute(fastify: FastifyInstance) {
     const note      = parsed.note;
     const utrNumber = parsed.utrNumber.trim().toUpperCase();
 
-    const existing = await fastify.prisma.depositRequest.findFirst({
-      where: { txId: utrNumber, method: "MANUAL_INR" } as any,
-    });
-    if (existing) throw new ValidationError("This UTR/Transaction ID has already been submitted");
-
     const effectiveRate = await getEffectiveInrRate(fastify.redis, fastify.prisma);
     const amountUsd = new Decimal(amountInr).dividedBy(effectiveRate).toDecimalPlaces(8);
 
-    const deposit = await fastify.prisma.depositRequest.create({
-      data: {
-        userId: request.user.sub,
-        gateway: "manual_inr",
-        method: "MANUAL_INR",
-        amountInr,
-        amountUsdt: null,
-        gatewayOrderId: `manual_inr_${request.user.sub}_${Date.now()}`,
-        inrRateSnapshot: new Decimal(effectiveRate).toDecimalPlaces(4).toNumber(),
-        txId: utrNumber,
-        adminNote: note ?? null,
-      } as any,
-    });
+    // Atomic duplicate check + create inside transaction to prevent race condition
+    let deposit: any;
+    try {
+      deposit = await fastify.prisma.$transaction(async (tx) => {
+        const existing = await tx.depositRequest.findFirst({
+          where: { txId: utrNumber, method: "MANUAL_INR" } as any,
+        });
+        if (existing) throw new ValidationError("This UTR/Transaction ID has already been submitted");
+
+        return tx.depositRequest.create({
+          data: {
+            userId: request.user.sub,
+            gateway: "manual_inr",
+            method: "MANUAL_INR",
+            amountInr,
+            amountUsdt: null,
+            gatewayOrderId: `manual_inr_${request.user.sub}_${Date.now()}`,
+            inrRateSnapshot: new Decimal(effectiveRate).toDecimalPlaces(4).toNumber(),
+            txId: utrNumber,
+            adminNote: note ?? null,
+          } as any,
+        });
+      });
+    } catch (err) {
+      if (err instanceof ValidationError) throw err;
+      throw err;
+    }
 
     return reply.status(201).send({
       depositId: deposit.id,

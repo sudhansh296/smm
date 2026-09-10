@@ -25,23 +25,32 @@ export default async function manualUsdtDepositRoute(fastify: FastifyInstance) {
     const network    = parsed.network;
     const txHash     = parsed.txHash.trim().toLowerCase();
 
-    const existing = await fastify.prisma.depositRequest.findFirst({
-      where: { txId: txHash, method: "MANUAL_USDT" } as any,
-    });
-    if (existing) throw new ValidationError("This transaction hash has already been submitted");
+    // Atomic duplicate check + create to prevent race condition on same txHash
+    let deposit: any;
+    try {
+      deposit = await fastify.prisma.$transaction(async (tx) => {
+        const existing = await tx.depositRequest.findFirst({
+          where: { txId: txHash, method: "MANUAL_USDT" } as any,
+        });
+        if (existing) throw new ValidationError("This transaction hash has already been submitted");
 
-    const deposit = await fastify.prisma.depositRequest.create({
-      data: {
-        userId: request.user.sub,
-        gateway: "manual_usdt",
-        method: "MANUAL_USDT",
-        amountInr: null,
-        amountUsdt,
-        gatewayOrderId: `manual_usdt_${request.user.sub}_${Date.now()}`,
-        txId: txHash,
-        adminNote: `Network: ${network}`,
-      } as any,
-    });
+        return tx.depositRequest.create({
+          data: {
+            userId: request.user.sub,
+            gateway: "manual_usdt",
+            method: "MANUAL_USDT",
+            amountInr: null,
+            amountUsdt,
+            gatewayOrderId: `manual_usdt_${request.user.sub}_${Date.now()}`,
+            txId: txHash,
+            adminNote: `Network: ${network}`,
+          } as any,
+        });
+      });
+    } catch (err) {
+      if (err instanceof ValidationError) throw err;
+      throw err;
+    }
 
     return reply.status(201).send({
       depositId: deposit.id,

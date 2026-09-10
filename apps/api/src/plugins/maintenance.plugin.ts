@@ -15,8 +15,12 @@ export default fp(async (fastify: FastifyInstance) => {
       "/auth/login",
       "/auth/refresh",
       "/auth/logout",
-      "/auth/google",         // OAuth redirect
+      "/auth/google",
       "/auth/google/callback",
+      "/auth/verify-email",          // users must be able to verify email during maintenance
+      "/auth/resend-verification",   // resend verify email
+      "/auth/forgot-password",       // password reset request
+      "/auth/reset-password",        // password reset confirm
     ];
     if (!path || BYPASS_PATHS.some((bp) => path.startsWith(bp))) return;
 

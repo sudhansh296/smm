@@ -95,8 +95,16 @@ export default async function adminOrdersRoute(fastify: FastifyInstance) {
         status: z.enum(["PENDING", "PROCESSING", "IN_PROGRESS", "COMPLETED"]),
       }).parse(request.body);
 
-      const exists = await fastify.prisma.order.findUnique({ where: { id }, select: { id: true } });
+      const exists = await fastify.prisma.order.findUnique({
+        where: { id },
+        select: { id: true, status: true, refundedAt: true },
+      }) as any;
       if (!exists) throw new NotFoundError("Order not found");
+
+      // Guard: never allow changing a REFUNDED order status (financial integrity)
+      if (exists.status === "REFUNDED" || exists.refundedAt) {
+        throw new ValidationError("Cannot change status of a refunded order");
+      }
 
       await fastify.prisma.order.update({ where: { id }, data: { status: status as never } });
       return reply.send({ message: "Status updated" });
@@ -121,7 +129,26 @@ export default async function adminOrdersRoute(fastify: FastifyInstance) {
         throw new ValidationError("Order has already been refunded");
       }
 
-      const refundAmount = new Decimal(order.costUsd.toString());
+      // Proportional refund: if order was partially delivered, refund only undelivered portion
+      // remains > 0 means that many units were NOT delivered
+      const remains = order.remains ?? null;
+      let refundAmount: Decimal;
+      if (remains !== null && remains > 0 && remains < order.quantity) {
+        // Partial delivery -- refund proportional to undelivered units
+        refundAmount = new Decimal(order.costUsd.toString())
+          .times(new Decimal(remains).dividedBy(order.quantity))
+          .toDecimalPlaces(8);
+      } else if (remains === 0) {
+        // Fully delivered -- no refund warranted (admin override still allowed)
+        refundAmount = new Decimal(0);
+      } else {
+        // Unknown remains or not delivered at all -- full refund
+        refundAmount = new Decimal(order.costUsd.toString());
+      }
+
+      if (refundAmount.isZero()) {
+        throw new ValidationError("Order appears fully delivered (remains=0). Override not supported via this endpoint.");
+      }
 
       await fastify.prisma.$transaction(async (tx) => {
         const locked = await tx.$queryRaw<Array<{ status: string; refundedAt: Date | null }>>`
