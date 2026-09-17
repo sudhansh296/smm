@@ -8,10 +8,24 @@ const PUBLIC_PATHS = [
   "/reset-password",
   "/verify-email",
   "/maintenance",
+  "/manifest.webmanifest",
 ];
+
+// Any request for a static file (has a file extension) -- images, favicons,
+// manifests, fonts, etc. served from /public or Next's file-based metadata
+// conventions (icon.png, etc.). Always bypasses auth, regardless of login
+// state -- these aren't pages and were previously getting 307-redirected to
+// "/" whenever the requester wasn't authenticated (broke logo/favicon/manifest
+// loading on the logged-out landing page).
+const STATIC_FILE_RE = /\.[a-zA-Z0-9]+$/;
 
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
+
+  if (STATIC_FILE_RE.test(pathname)) {
+    return NextResponse.next();
+  }
+
   const accessToken  = request.cookies.get("accessToken")?.value;
   const refreshToken = request.cookies.get("refreshToken")?.value;
   const isAuthenticated = !!(accessToken || refreshToken);

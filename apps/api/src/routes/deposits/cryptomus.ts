@@ -8,6 +8,12 @@ import { cryptomusRequest } from "../../services/cryptomus.service.js";
 export default async function cryptomusDepositRoute(fastify: FastifyInstance) {
   const mode = env.CRYPTOMUS_MODE;
 
+  // Gateway intentionally not offered -- register no routes at all
+  if (mode === "disabled") {
+    fastify.log.info("[cryptomus] Disabled -- skipping");
+    return;
+  }
+
   // POST /deposits/cryptomus — create invoice
   fastify.post("/cryptomus", { preHandler: [fastify.authenticate] }, async (request, reply) => {
     const { amountUsdt } = z.object({

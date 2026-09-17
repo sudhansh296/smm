@@ -8,6 +8,7 @@ import {
   Star, Globe, Headphones, RefreshCw,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Logo } from "@/components/ui/logo";
 
 const FEATURES = [
   { icon: Zap,         title: "Instant Delivery",    desc: "Orders start processing within minutes of placement. No waiting, guaranteed.",        color: "bg-yellow-50 text-yellow-600 border-yellow-100" },
@@ -276,9 +277,7 @@ export default function LandingPage() {
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-8 mb-10">
             <div>
               <div className="flex items-center gap-2.5 mb-4">
-                <div className="w-9 h-9 bg-primary rounded-xl flex items-center justify-center">
-                  <span className="text-white font-bold text-sm">N</span>
-                </div>
+                <Logo className="w-9 h-9 rounded-xl" textClassName="text-sm" />
                 <span className="font-bold text-white text-lg">NexusSMM</span>
               </div>
               <p className="text-sm leading-relaxed">India&apos;s trusted SMM panel. Fast delivery, secure payments, real results.</p>

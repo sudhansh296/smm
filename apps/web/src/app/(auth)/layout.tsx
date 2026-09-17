@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { Logo } from "@/components/ui/logo";
 
 export default function AuthLayout({ children }: { children: React.ReactNode }) {
   return (
@@ -11,9 +12,7 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
       {/* Navbar */}
       <header className="sticky top-0 z-50 h-16 flex items-center justify-between px-4 sm:px-8 border-b border-white/10 bg-slate-900/95 backdrop-blur-sm">
         <Link href="/" className="flex items-center gap-2.5">
-          <div className="w-9 h-9 bg-primary rounded-xl flex items-center justify-center shadow-sm">
-            <span className="text-white font-bold text-base">N</span>
-          </div>
+          <Logo className="w-9 h-9 rounded-xl" textClassName="text-base" />
           <span className="font-bold text-xl text-white tracking-tight">NexusSMM</span>
         </Link>
         <nav className="hidden sm:flex items-center gap-1">
@@ -22,7 +21,7 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
           <Link href="/#faq" className="px-3 py-1.5 text-sm text-slate-400 hover:text-white hover:bg-white/10 rounded-lg transition-all">FAQ</Link>
         </nav>
         <div className="flex items-center gap-2">
-          <Link href="/" className="px-4 py-2 text-sm font-medium text-slate-300 hover:text-white hover:bg-white/10 rounded-lg transition-all">Sign In</Link>
+          <Link href="/#login-form" className="px-4 py-2 text-sm font-medium text-slate-300 hover:text-white hover:bg-white/10 rounded-lg transition-all">Sign In</Link>
           <Link href="/register" className="px-4 py-2 text-sm font-medium bg-primary hover:bg-primary/90 text-white rounded-lg transition-all shadow-sm">Get Started</Link>
         </div>
       </header>
@@ -36,9 +35,7 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
       <footer className="relative z-10 border-t border-white/10 py-6 px-4 sm:px-8">
         <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-slate-500">
           <div className="flex items-center gap-2">
-            <div className="w-5 h-5 bg-primary rounded flex items-center justify-center">
-              <span className="text-white font-bold text-xs">N</span>
-            </div>
+            <Logo className="w-5 h-5 rounded" textClassName="text-xs" />
             <span>&copy; {new Date().getFullYear()} NexusSMM. All rights reserved.</span>
           </div>
           <div className="flex items-center gap-4">

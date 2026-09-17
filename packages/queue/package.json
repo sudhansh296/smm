@@ -12,6 +12,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@nexussmm/types": "workspace:*",
     "bullmq": "^5.34.0",
     "ioredis": "^5.4.1"
   },

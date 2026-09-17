@@ -4,6 +4,7 @@ import {
   generateRefreshToken,
   hashRefreshToken,
 } from "../../services/auth.service.js";
+import { cookieSecure } from "../../lib/env.js";
 
 export default async function googleAuthRoute(fastify: FastifyInstance) {
   const clientId     = process.env["GOOGLE_CLIENT_ID"];
@@ -98,9 +99,8 @@ export default async function googleAuthRoute(fastify: FastifyInstance) {
       });
 
       // Set HttpOnly cookies
-      const isProd = process.env["NODE_ENV"] === "production";
-      reply.setCookie("refreshToken", rawRefresh, { httpOnly: true, secure: isProd, sameSite: "strict", path: "/", maxAge: 7 * 24 * 60 * 60 });
-      reply.setCookie("accessToken",  jwtToken,   { httpOnly: true, secure: isProd, sameSite: "lax",    path: "/", maxAge: 900 });
+      reply.setCookie("refreshToken", rawRefresh, { httpOnly: true, secure: cookieSecure, sameSite: "strict", path: "/", maxAge: 7 * 24 * 60 * 60 });
+      reply.setCookie("accessToken",  jwtToken,   { httpOnly: true, secure: cookieSecure, sameSite: "lax",    path: "/", maxAge: 900 });
 
       return reply.redirect(`${frontendUrl}/dashboard`);
 

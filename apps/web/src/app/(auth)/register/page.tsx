@@ -86,7 +86,7 @@ export default function RegisterPage() {
           <Button variant="outline" className="w-full rounded-xl border-slate-300" onClick={handleResend} disabled={resendLoading}>
             {resendLoading ? "Sending..." : "Resend Verification Email"}
           </Button>
-          <Link href="/">
+          <Link href="/#login-form">
             <Button variant="ghost" className="w-full rounded-xl text-slate-600">Back to Sign In</Button>
           </Link>
         </div>
@@ -171,7 +171,7 @@ export default function RegisterPage() {
 
       <p className="mt-5 text-center text-sm text-slate-500">
         Already have an account?{" "}
-        <Link href="/" className="text-primary hover:underline font-semibold">Sign in</Link>
+        <Link href="/#login-form" className="text-primary hover:underline font-semibold">Sign in</Link>
       </p>
     </div>
   );

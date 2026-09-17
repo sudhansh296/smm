@@ -108,7 +108,14 @@ export async function finalizeRazorpayDeposit(
 }
 
 export default async function razorpayDepositRoute(fastify: FastifyInstance) {
-  const mode = env.RAZORPAY_MODE; // "mock" | "test" | "live"
+  const mode = env.RAZORPAY_MODE; // "disabled" | "mock" | "test" | "live"
+
+  // Gateway intentionally not offered -- register no routes at all
+  if (mode === "disabled") {
+    fastify.log.info("[razorpay] Disabled -- skipping");
+    return;
+  }
+
   const isMock = mode === "mock";
   const isLive = mode === "live";
 

@@ -2,8 +2,10 @@
   "name": "nexussmm",
   "version": "1.0.0",
   "private": true,
+  "packageManager": "pnpm@9.15.0",
   "scripts": {
     "dev": "turbo run dev",
+    "dev:all": "turbo run dev dev:worker",
     "build": "turbo run build",
     "lint": "turbo run lint",
     "typecheck": "turbo run typecheck",

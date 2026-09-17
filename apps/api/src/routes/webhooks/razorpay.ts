@@ -13,6 +13,11 @@ function safeEqual(a: string, b: string): boolean {
 }
 
 export default async function razorpayWebhookRoute(fastify: FastifyInstance) {
+  if (env.RAZORPAY_MODE === "disabled") {
+    fastify.log.info("[razorpay-webhook] Disabled -- skipping");
+    return;
+  }
+
   fastify.post("/razorpay", {
     config: {
       rawBody: true,

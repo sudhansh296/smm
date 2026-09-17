@@ -1,0 +1,69 @@
+# ════════════════════════════════════════════════════════════════════
+# HTTPS + domain config -- kept as a ready reference for when a real
+# domain + Let's Encrypt cert exist. NOT currently active (this file is
+# outside nginx/templates/ on purpose, so nginx's auto-envsubst ignores it).
+#
+# To switch to this later:
+#   1. Point the domain's DNS A record at the VPS IP
+#   2. Re-enable the certbot service: `docker compose --profile ssl up -d`
+#      (or remove the `profiles: ["ssl"]` line in docker-compose.yml)
+#   3. Copy this file's content into nginx/templates/nexussmm.conf.template
+#      (replacing the interim HTTP-only version)
+#   4. Update .env: DOMAIN=yourdomain.com, FRONTEND_URL/NEXT_PUBLIC_API_URL/
+#      API_BASE_URL -> https://yourdomain.com, remove COOKIE_SECURE (or set
+#      to true) so cookies switch back to secure mode
+#   5. docker compose up -d --build
+# ════════════════════════════════════════════════════════════════════
+
+# HTTP — redirect to HTTPS + ACME challenge
+server {
+  listen 80;
+  server_name ${DOMAIN};
+
+  location /.well-known/acme-challenge/ {
+    root /var/www/certbot;
+  }
+
+  location / {
+    return 301 https://$host$request_uri;
+  }
+}
+
+# HTTPS
+server {
+  listen 443 ssl;
+  http2 on;
+  server_name ${DOMAIN};
+
+  ssl_certificate     /etc/letsencrypt/live/${DOMAIN}/fullchain.pem;
+  ssl_certificate_key /etc/letsencrypt/live/${DOMAIN}/privkey.pem;
+  ssl_protocols       TLSv1.2 TLSv1.3;
+  ssl_ciphers         ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384;
+  ssl_prefer_server_ciphers off;
+  ssl_session_cache   shared:SSL:10m;
+  ssl_session_timeout 1d;
+
+  add_header Strict-Transport-Security "max-age=63072000" always;
+
+  # API — all backend routes
+  location ~ ^/(api|auth|user|services|orders|deposits|webhooks|admin|health) {
+    proxy_pass http://api:3001;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_read_timeout 60s;
+  }
+
+  # Next.js frontend
+  location / {
+    proxy_pass http://web:3000;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+    proxy_read_timeout 60s;
+  }
+}

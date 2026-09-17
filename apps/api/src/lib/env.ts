@@ -39,14 +39,14 @@ const envSchema = z.object({
   // API base URL for webhook callbacks
   API_BASE_URL: z.string().url().optional(),
 
-  // Razorpay
-  RAZORPAY_MODE: z.enum(["mock", "test", "live"]).default("mock"),
+  // Razorpay -- "disabled" means this gateway isn't offered; skips all validation below
+  RAZORPAY_MODE: z.enum(["disabled", "mock", "test", "live"]).default("mock"),
   RAZORPAY_KEY_ID: z.string().default("mock"),
   RAZORPAY_KEY_SECRET: z.string().default("mock"),
   RAZORPAY_WEBHOOK_SECRET: z.string().default("mock"),
 
-  // Cryptomus
-  CRYPTOMUS_MODE: z.enum(["mock", "test", "live"]).default("mock"),
+  // Cryptomus -- "disabled" means this gateway isn't offered; skips all validation below
+  CRYPTOMUS_MODE: z.enum(["disabled", "mock", "test", "live"]).default("mock"),
   CRYPTOMUS_API_KEY: z.string().default("mock"),
   CRYPTOMUS_MERCHANT_ID: z.string().default("mock"),
 
@@ -62,6 +62,12 @@ const envSchema = z.object({
     .string()
     .transform((v) => v === "true")
     .default("false"),
+
+  // Cookie secure flag -- unset falls back to NODE_ENV==="production" (previous
+  // behavior). Set explicitly to "false" when running NODE_ENV=production
+  // without HTTPS in front (e.g. an interim IP-only deploy) -- otherwise
+  // browsers silently drop `secure` cookies over plain HTTP and login breaks.
+  COOKIE_SECURE: z.enum(["true", "false"]).optional(),
 });
 
 export type Env = z.infer<typeof envSchema>;
@@ -80,6 +86,11 @@ function validateEnv(): Env {
 
 export const env = validateEnv();
 
+// Whether auth cookies should be marked `secure` (HTTPS-only). Explicit
+// COOKIE_SECURE overrides; otherwise falls back to NODE_ENV==="production".
+export const cookieSecure =
+  env.COOKIE_SECURE !== undefined ? env.COOKIE_SECURE === "true" : env.NODE_ENV === "production";
+
 // ──────────────────────────────────────────────────────────────────────────────
 // Startup validations
 // ──────────────────────────────────────────────────────────────────────────────
@@ -87,6 +98,8 @@ export const env = validateEnv();
 // Razorpay mode startup validation
 (function validateRazorpayMode() {
   const { NODE_ENV, RAZORPAY_MODE, RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET, RAZORPAY_WEBHOOK_SECRET } = env;
+
+  if (RAZORPAY_MODE === "disabled") return; // gateway intentionally not offered -- no checks apply
 
   if (NODE_ENV === "production" && RAZORPAY_MODE === "mock") {
     console.error("[FAIL] RAZORPAY_MODE=mock is not allowed in production.");
@@ -128,6 +141,8 @@ export const env = validateEnv();
 // Cryptomus mode startup validation
 (function validateCryptomusMode() {
   const { NODE_ENV, CRYPTOMUS_MODE, CRYPTOMUS_API_KEY, CRYPTOMUS_MERCHANT_ID } = env;
+
+  if (CRYPTOMUS_MODE === "disabled") return; // gateway intentionally not offered -- no checks apply
 
   if (NODE_ENV === "production" && (CRYPTOMUS_MODE === "mock" || CRYPTOMUS_MODE === "test")) {
     console.error("[FAIL] CRYPTOMUS_MODE=mock/test is not allowed in production. Use CRYPTOMUS_MODE=live.");

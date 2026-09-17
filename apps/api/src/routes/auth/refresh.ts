@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { hashRefreshToken, generateRefreshToken } from "../../services/auth.service.js";
 import { UnauthorizedError } from "../../lib/errors.js";
+import { cookieSecure } from "../../lib/env.js";
 
 export default async function refreshRoute(fastify: FastifyInstance) {
   fastify.post("/refresh", async (request, reply) => {
@@ -78,7 +79,7 @@ export default async function refreshRoute(fastify: FastifyInstance) {
 
     reply.setCookie("refreshToken", newRawToken, {
       httpOnly: true,
-      secure: process.env["NODE_ENV"] === "production",
+      secure: cookieSecure,
       sameSite: "strict",
       path: "/",
       maxAge: 7 * 24 * 60 * 60,
@@ -90,7 +91,7 @@ export default async function refreshRoute(fastify: FastifyInstance) {
 
     reply.setCookie("accessToken", accessToken, {
       httpOnly: true,
-      secure: process.env["NODE_ENV"] === "production",
+      secure: cookieSecure,
       sameSite: "lax",
       path: "/",
       maxAge: 900,

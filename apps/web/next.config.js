@@ -1,6 +1,9 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  // output: "standalone",  // disabled: causes EPERM symlink errors on Windows
+  // Required for the Docker web image (apps/web/Dockerfile copies .next/standalone).
+  // Known tradeoff: `next build` (not `next dev`) hits an EPERM symlink error on
+  // Windows with this enabled -- doesn't affect local dev, only a local Windows build.
+  output: "standalone",
   experimental: {
     serverComponentsExternalPackages: [],
   },

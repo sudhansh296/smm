@@ -73,7 +73,7 @@ services:
       REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
       NODE_ENV: production
       WORKER_MODE: "true"
-    command: ["node", "dist/worker-entrypoint.js"]
+    command: ["node", "dist/apps/api/src/worker-entrypoint.js"]
     networks:
       - internal
 
@@ -88,7 +88,10 @@ services:
     env_file: .env
     environment:
       NODE_ENV: production
-      NEXT_PUBLIC_API_URL: https://${DOMAIN}/api
+      # Bare origin, no scheme mismatch or /api suffix -- nginx forwards
+      # matched paths (e.g. /user/wallet) to the api container as-is, and
+      # Fastify's routes aren't registered under /api except /api/v2.
+      NEXT_PUBLIC_API_URL: http://${DOMAIN}
     networks:
       - internal
 
@@ -98,9 +101,14 @@ services:
     ports:
       - "80:80"
       - "443:443"
+    environment:
+      DOMAIN: ${DOMAIN}
+      # Restricts envsubst to only this variable, so nginx's own runtime
+      # variables ($host, $remote_addr, etc. -- all lowercase) are untouched.
+      NGINX_ENVSUBST_FILTER: DOMAIN
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      - ./nginx/templates:/etc/nginx/templates:ro
       - certbot_webroot:/var/www/certbot:ro
       - letsencrypt:/etc/letsencrypt:ro
     depends_on:
@@ -113,6 +121,10 @@ services:
   certbot:
     image: certbot/certbot:latest
     restart: unless-stopped
+    # Not started by a plain `docker compose up` -- Let's Encrypt never issues
+    # certs for bare IP addresses, so this would just loop failing until a
+    # real domain exists. Re-enable with `docker compose --profile ssl up -d`.
+    profiles: ["ssl"]
     volumes:
       - certbot_webroot:/var/www/certbot
       - letsencrypt:/etc/letsencrypt

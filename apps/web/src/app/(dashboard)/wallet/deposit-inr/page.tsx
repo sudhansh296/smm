@@ -25,12 +25,16 @@ const manualSchema = z.object({
 });
 
 export default function DepositInrPage() {
-  const [tab, setTab] = useState<"razorpay" | "manual">("razorpay");
+  const [tab, setTab] = useState<"razorpay" | "manual">("manual");
   const qc = useQueryClient();
   const [rzpLoading, setRzpLoading] = useState(false);
   const [manualDone, setManualDone] = useState(false);
   const [manualLoading, setManualLoading] = useState(false);
 
+  const { data: depositsConfig } = useQuery({
+    queryKey: ["deposits-config"],
+    queryFn: () => api.get("/deposits/config").then((r) => r.data),
+  });
   const { data: wallet } = useQuery({ queryKey: ["wallet"], queryFn: () => api.get("/user/wallet").then((r) => r.data), staleTime: 0 });
   const { data: bankDetails } = useQuery({
     queryKey: ["bank-details"],
@@ -152,9 +156,11 @@ export default function DepositInrPage() {
 
       {/* Tab switcher */}
       <div className="flex rounded-lg border overflow-hidden">
-        <button onClick={() => setTab("razorpay")} className={`flex-1 py-2.5 text-sm font-medium transition-colors flex items-center justify-center gap-2 ${tab === "razorpay" ? "bg-primary text-primary-foreground" : "hover:bg-muted"}`}>
-          <CreditCard className="h-4 w-4" /> Pay Online
-        </button>
+        {depositsConfig?.razorpayEnabled && (
+          <button onClick={() => setTab("razorpay")} className={`flex-1 py-2.5 text-sm font-medium transition-colors flex items-center justify-center gap-2 ${tab === "razorpay" ? "bg-primary text-primary-foreground" : "hover:bg-muted"}`}>
+            <CreditCard className="h-4 w-4" /> Pay Online
+          </button>
+        )}
         <button onClick={() => setTab("manual")} className={`flex-1 py-2.5 text-sm font-medium transition-colors flex items-center justify-center gap-2 ${tab === "manual" ? "bg-primary text-primary-foreground" : "hover:bg-muted"}`}>
           <Building2 className="h-4 w-4" /> Bank Transfer
         </button>

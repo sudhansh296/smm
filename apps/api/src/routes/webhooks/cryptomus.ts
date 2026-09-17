@@ -16,6 +16,11 @@ function safeSignatureEqual(a: string, b: string): boolean {
 }
 
 export default async function cryptomusWebhookRoute(fastify: FastifyInstance) {
+  if (env.CRYPTOMUS_MODE === "disabled") {
+    fastify.log.info("[cryptomus-webhook] Disabled -- skipping");
+    return;
+  }
+
   fastify.post("/cryptomus", {
     config: { rateLimit: { max: 200, timeWindow: 60_000 } },
   }, async (request, reply) => {

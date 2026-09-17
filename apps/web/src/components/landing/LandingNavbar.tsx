@@ -4,6 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { Menu, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Logo } from "@/components/ui/logo";
 
 export function LandingNavbar() {
   const [open, setOpen] = useState(false);
@@ -12,9 +13,7 @@ export function LandingNavbar() {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
         {/* Logo */}
         <Link href="/" className="flex items-center gap-2.5 shrink-0">
-          <div className="w-9 h-9 bg-primary rounded-xl flex items-center justify-center shadow-sm">
-            <span className="text-white font-bold text-base">N</span>
-          </div>
+          <Logo className="w-9 h-9 rounded-xl" textClassName="text-base" />
           <span className="font-bold text-xl text-slate-900 tracking-tight">NexusSMM</span>
         </Link>
 

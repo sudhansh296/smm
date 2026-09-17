@@ -144,7 +144,7 @@ docker compose up -d --build
 ```bash
 docker compose exec api npx prisma migrate deploy \
   --schema ../../packages/db/prisma/schema.prisma
-docker compose exec api node dist/worker-entrypoint.js --seed
+docker compose exec api node dist/apps/api/src/worker-entrypoint.js --seed
 ```
 
 ### 6. Verify

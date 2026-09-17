@@ -12,6 +12,7 @@ import {
   ValidationError,
   ForbiddenError,
 } from "../../lib/errors.js";
+import { cookieSecure } from "../../lib/env.js";
 
 const LOCK_TTL = 900; // 15 minutes
 const MAX_ATTEMPTS = 5;
@@ -134,7 +135,7 @@ export default async function loginRoute(fastify: FastifyInstance) {
 
     reply.setCookie("refreshToken", rawRefresh, {
       httpOnly: true,
-      secure: process.env["NODE_ENV"] === "production",
+      secure: cookieSecure,
       sameSite: "strict",
       path: "/",
       maxAge: 7 * 24 * 60 * 60,
@@ -143,7 +144,7 @@ export default async function loginRoute(fastify: FastifyInstance) {
     // HttpOnly access token cookie  --  not readable by browser JS (XSS protection)
     reply.setCookie("accessToken", accessToken, {
       httpOnly: true,
-      secure: process.env["NODE_ENV"] === "production",
+      secure: cookieSecure,
       sameSite: "lax",
       path: "/",
       maxAge: 900,

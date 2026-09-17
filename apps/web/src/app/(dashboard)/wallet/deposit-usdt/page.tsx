@@ -45,7 +45,7 @@ const TEST_STATUSES = [
 ] as const;
 
 export default function DepositUsdtPage() {
-  const [tab, setTab] = useState<"auto" | "manual">("auto");
+  const [tab, setTab] = useState<"auto" | "manual">("manual");
   const [autoLoading, setAutoLoading] = useState(false);
   const [manualLoading, setManualLoading] = useState(false);
   const [invoice, setInvoice] = useState<Invoice | null>(null);
@@ -54,6 +54,10 @@ export default function DepositUsdtPage() {
   const [testEventLoading, setTestEventLoading] = useState<string | null>(null);
   const qc = useQueryClient();
 
+  const { data: depositsConfig } = useQuery({
+    queryKey: ["deposits-config"],
+    queryFn: () => api.get("/deposits/config").then((r) => r.data),
+  });
   const { data: addresses } = useQuery({
     queryKey: ["usdt-addresses"],
     queryFn: () => api.get("/deposits/usdt-address").then((r) => r.data),
@@ -113,12 +117,14 @@ export default function DepositUsdtPage() {
 
       {/* Tab switcher */}
       <div className="flex rounded-lg border overflow-hidden">
-        <button
-          onClick={() => setTab("auto")}
-          className={`flex-1 py-2.5 text-sm font-medium transition-colors flex items-center justify-center gap-2 ${tab === "auto" ? "bg-primary text-primary-foreground" : "hover:bg-muted"}`}
-        >
-          <Zap className="h-4 w-4" /> Auto Payment
-        </button>
+        {depositsConfig?.cryptomusEnabled && (
+          <button
+            onClick={() => setTab("auto")}
+            className={`flex-1 py-2.5 text-sm font-medium transition-colors flex items-center justify-center gap-2 ${tab === "auto" ? "bg-primary text-primary-foreground" : "hover:bg-muted"}`}
+          >
+            <Zap className="h-4 w-4" /> Auto Payment
+          </button>
+        )}
         <button
           onClick={() => setTab("manual")}
           className={`flex-1 py-2.5 text-sm font-medium transition-colors flex items-center justify-center gap-2 ${tab === "manual" ? "bg-primary text-primary-foreground" : "hover:bg-muted"}`}

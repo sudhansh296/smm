@@ -25,6 +25,7 @@ import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/useAuth";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
+import { Logo } from "@/components/ui/logo";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 
@@ -118,7 +119,10 @@ export function Sidebar() {
   const { data: walletData } = useQuery({
     queryKey: ["wallet"],
     queryFn: () => api.get("/user/wallet").then((r) => r.data),
-    enabled: !!user,
+    // Fires on the auth cookie alone, not on Zustand's `user` -- right after
+    // Google OAuth login, `user` takes an extra round trip to populate (see
+    // dashboard layout), so gating on it here would needlessly serialize
+    // this fetch behind that one instead of letting them run in parallel.
     refetchInterval: 15_000,
     refetchOnWindowFocus: true,
     staleTime: 10_000,       // show cached balance instantly, refresh in background
@@ -133,9 +137,7 @@ export function Sidebar() {
       {/* Logo */}
       <div className="p-5 border-b flex items-center justify-between">
         <Link href="/dashboard" {...(onClose ? { onClick: onClose } : {})} className="flex items-center gap-2">
-          <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center shrink-0">
-            <span className="text-white font-bold text-sm">N</span>
-          </div>
+          <Logo className="w-8 h-8 rounded-lg" textClassName="text-sm" />
           <span className="font-bold text-lg">NexusSMM</span>
         </Link>
         {onClose && (
@@ -180,9 +182,7 @@ export function Sidebar() {
       {/* -- MOBILE top bar ------------------------------------ */}
       <div className="lg:hidden fixed top-0 left-0 right-0 z-40 flex items-center justify-between px-4 h-14 border-b bg-card">
         <Link href="/dashboard" className="flex items-center gap-2">
-          <div className="w-7 h-7 bg-primary rounded-lg flex items-center justify-center">
-            <span className="text-white font-bold text-xs">N</span>
-          </div>
+          <Logo className="w-7 h-7 rounded-lg" textClassName="text-xs" />
           <span className="font-bold">NexusSMM</span>
         </Link>
         <div className="flex items-center gap-3">

@@ -2,7 +2,7 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "outDir": "./dist",
-    "baseUrl": ".",
+    "rootDir": "../..",
     "skipLibCheck": true,
     "paths": {
       "@nexussmm/db": ["../../packages/db/src/index.ts"],
